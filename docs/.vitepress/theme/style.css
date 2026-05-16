@@ -1,0 +1,507 @@
+/**
+ * opendray VitePress theme overrides.
+ *
+ * Brand palette (from docs/public/logo.svg):
+ *   primary deep   #7e14ff
+ *   primary mid    #863bff
+ *   primary tint   #ede6ff
+ *   accent sky     #47bfff
+ *
+ * Reference styling: Element Plus + OpenClaw + Linear/Vercel.
+ */
+
+/* ---------- font face ---------- */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* ---------- design tokens ---------- */
+
+:root {
+  /* brand palette */
+  --od-purple-50:  #f7f2ff;
+  --od-purple-100: #ede6ff;
+  --od-purple-200: #d6c2ff;
+  --od-purple-300: #b896ff;
+  --od-purple-400: #9962ff;
+  --od-purple-500: #863bff;  /* primary mid */
+  --od-purple-600: #7e14ff;  /* primary deep */
+  --od-purple-700: #6800e0;
+  --od-purple-800: #5300b3;
+  --od-purple-900: #3e0089;
+
+  --od-sky-400: #47bfff;
+  --od-sky-500: #1ea7ff;
+  --od-sky-600: #0c8fe0;
+
+  --od-ink-50:  #f8fafc;
+  --od-ink-100: #f1f5f9;
+  --od-ink-200: #e2e8f0;
+  --od-ink-300: #cbd5e1;
+  --od-ink-400: #94a3b8;
+  --od-ink-500: #64748b;
+  --od-ink-600: #475569;
+  --od-ink-700: #334155;
+  --od-ink-800: #1e293b;
+  --od-ink-900: #0f172a;
+  --od-ink-950: #060818;
+
+  /* status colors */
+  --od-success: #10b981;
+  --od-warning: #f59e0b;
+  --od-danger:  #ef4444;
+  --od-info:    var(--od-sky-500);
+
+  /* typography */
+  --vp-font-family-base: 'Inter', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue',
+    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --vp-font-family-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular,
+    'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+/* ---------- VitePress brand variable overrides ---------- */
+
+:root {
+  /* primary (links, active nav) */
+  --vp-c-brand-1: var(--od-purple-600);
+  --vp-c-brand-2: var(--od-purple-500);
+  --vp-c-brand-3: var(--od-purple-400);
+  --vp-c-brand-soft: rgba(126, 20, 255, 0.14);
+
+  /* legacy aliases — VitePress 1.x reads both names */
+  --vp-c-brand: var(--od-purple-600);
+  --vp-c-brand-light: var(--od-purple-500);
+  --vp-c-brand-lighter: var(--od-purple-400);
+  --vp-c-brand-dark: var(--od-purple-700);
+  --vp-c-brand-darker: var(--od-purple-800);
+
+  /* hero gradient */
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(
+    120deg,
+    var(--od-purple-600) 0%,
+    var(--od-sky-500) 50%,
+    var(--od-purple-500) 100%
+  );
+
+  /* hero image background glow */
+  --vp-home-hero-image-background-image: linear-gradient(
+    -45deg,
+    rgba(126, 20, 255, 0.5) 50%,
+    rgba(71, 191, 255, 0.5) 50%
+  );
+  --vp-home-hero-image-filter: blur(56px);
+
+  /* button brand */
+  --vp-button-brand-bg: var(--od-purple-600);
+  --vp-button-brand-hover-bg: var(--od-purple-700);
+  --vp-button-brand-active-bg: var(--od-purple-800);
+  --vp-button-brand-text: #ffffff;
+  --vp-button-brand-hover-text: #ffffff;
+  --vp-button-brand-active-text: #ffffff;
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-hover-border: transparent;
+  --vp-button-brand-active-border: transparent;
+
+  /* alt button */
+  --vp-button-alt-bg: var(--od-purple-50);
+  --vp-button-alt-hover-bg: var(--od-purple-100);
+  --vp-button-alt-text: var(--od-purple-700);
+  --vp-button-alt-hover-text: var(--od-purple-800);
+  --vp-button-alt-border: transparent;
+
+  /* code block tint */
+  --vp-code-color: var(--od-purple-700);
+  --vp-code-bg: var(--od-purple-50);
+
+  /* feature card */
+  --vp-home-feature-card-bg: #ffffff;
+  --vp-home-feature-card-border: var(--od-ink-200);
+
+  /* misc */
+  --vp-c-bg: #ffffff;
+  --vp-c-bg-soft: #fafafa;
+  --vp-c-bg-mute: var(--od-ink-50);
+  --vp-c-bg-alt: var(--od-purple-50);
+  --vp-c-text-1: var(--od-ink-900);
+  --vp-c-text-2: var(--od-ink-600);
+  --vp-c-text-3: var(--od-ink-500);
+
+  --vp-layout-max-width: 1500px;
+}
+
+/* ---------- dark mode ---------- */
+
+.dark {
+  --vp-c-brand-1: #b896ff;
+  --vp-c-brand-2: var(--od-purple-400);
+  --vp-c-brand-3: var(--od-purple-500);
+  --vp-c-brand-soft: rgba(184, 150, 255, 0.16);
+
+  --vp-c-brand: #b896ff;
+  --vp-c-brand-light: var(--od-purple-300);
+  --vp-c-brand-lighter: var(--od-purple-200);
+  --vp-c-brand-dark: var(--od-purple-500);
+
+  --vp-home-hero-name-background: linear-gradient(
+    120deg,
+    #b896ff 0%,
+    var(--od-sky-400) 50%,
+    var(--od-purple-300) 100%
+  );
+
+  --vp-home-hero-image-background-image: linear-gradient(
+    -45deg,
+    rgba(126, 20, 255, 0.45) 50%,
+    rgba(71, 191, 255, 0.45) 50%
+  );
+
+  --vp-button-brand-bg: var(--od-purple-500);
+  --vp-button-brand-hover-bg: var(--od-purple-400);
+  --vp-button-brand-active-bg: var(--od-purple-600);
+  --vp-button-alt-bg: rgba(126, 20, 255, 0.16);
+  --vp-button-alt-hover-bg: rgba(126, 20, 255, 0.28);
+  --vp-button-alt-text: #d6c2ff;
+  --vp-button-alt-hover-text: #ede6ff;
+
+  --vp-c-bg: #0a0c1f;
+  --vp-c-bg-soft: #0f1230;
+  --vp-c-bg-mute: #161a3f;
+  --vp-c-bg-alt: #08091a;
+
+  --vp-c-text-1: #f1f5f9;
+  --vp-c-text-2: #cbd5e1;
+  --vp-c-text-3: #94a3b8;
+
+  --vp-c-divider: rgba(148, 163, 184, 0.14);
+  --vp-c-border: rgba(148, 163, 184, 0.18);
+  --vp-c-gutter: rgba(148, 163, 184, 0.08);
+
+  --vp-home-feature-card-bg: rgba(255, 255, 255, 0.03);
+  --vp-home-feature-card-border: rgba(148, 163, 184, 0.18);
+
+  --vp-code-color: #d6c2ff;
+  --vp-code-bg: rgba(126, 20, 255, 0.16);
+}
+
+/* ---------- global polish ---------- */
+
+html {
+  scroll-behavior: smooth;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  text-rendering: optimizeLegibility;
+}
+
+/* smoother color transitions when toggling theme */
+html, body, .VPNav, .VPSidebar, .VPContent, .VPDoc {
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease,
+    color 0.3s ease;
+}
+
+/* ---------- nav bar polish ---------- */
+
+.VPNav {
+  backdrop-filter: saturate(180%) blur(16px);
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
+}
+
+.VPNavBar:not(.has-sidebar):not(.home.top) {
+  background-color: rgba(255, 255, 255, 0.78);
+}
+
+.dark .VPNavBar:not(.has-sidebar):not(.home.top) {
+  background-color: rgba(10, 12, 31, 0.78);
+}
+
+.VPNavBar.home.top {
+  background: transparent;
+  border-bottom: 1px solid transparent;
+}
+
+.VPNavBarTitle .title {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+/* ---------- sidebar polish ---------- */
+
+.VPSidebar {
+  padding-top: 32px !important;
+}
+
+.VPSidebarItem.level-0 > .item > .text {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--od-ink-500);
+  font-weight: 700;
+}
+
+.dark .VPSidebarItem.level-0 > .item > .text {
+  color: var(--od-ink-400);
+}
+
+.VPSidebarItem.level-0 {
+  padding-bottom: 22px;
+  border-bottom: 1px dashed var(--vp-c-divider);
+  margin-bottom: 22px;
+}
+
+.VPSidebarItem.level-0:last-child {
+  border-bottom: none;
+}
+
+.VPSidebarItem.is-link > .item > .link:hover .text {
+  color: var(--vp-c-brand-1);
+}
+
+.VPSidebarItem.is-active > .item > .link .text {
+  color: var(--vp-c-brand-1);
+  font-weight: 600;
+}
+
+/* sidebar group icon (data-icon attribute on the group label) */
+.VPSidebarItem.level-0 > .item .text::before {
+  content: attr(data-icon);
+  display: inline-block;
+  margin-right: 8px;
+  font-size: 14px;
+  vertical-align: middle;
+  filter: grayscale(0.2);
+}
+
+/* ---------- doc content polish ---------- */
+
+.VPDoc h1 {
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  background: linear-gradient(
+    180deg,
+    var(--od-ink-900) 0%,
+    var(--od-ink-700) 100%
+  );
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.dark .VPDoc h1 {
+  background: linear-gradient(
+    180deg,
+    #ffffff 0%,
+    #cbd5e1 100%
+  );
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.VPDoc h2 {
+  border-top: 1px solid var(--vp-c-divider);
+  padding-top: 24px;
+  margin-top: 48px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.VPDoc h3 {
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.VPDoc a:not(.header-anchor):not(.VPLink) {
+  font-weight: 500;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1.5px;
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
+}
+
+.VPDoc a:not(.header-anchor):not(.VPLink):hover {
+  text-decoration-color: var(--vp-c-brand-2);
+}
+
+/* table polish */
+.vp-doc table {
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--vp-c-divider);
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.vp-doc tr {
+  background-color: transparent;
+}
+
+.vp-doc tr:nth-child(2n) {
+  background-color: var(--vp-c-bg-soft);
+}
+
+.vp-doc th {
+  background: linear-gradient(180deg, var(--od-purple-50), transparent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--od-purple-700);
+}
+
+.dark .vp-doc th {
+  background: linear-gradient(180deg, rgba(126, 20, 255, 0.12), transparent);
+  color: var(--od-purple-200);
+}
+
+/* code block polish */
+.vp-doc div[class*='language-'] {
+  border-radius: 12px;
+  border: 1px solid var(--vp-c-divider);
+  margin: 20px 0;
+}
+
+.vp-doc div[class*='language-']::before {
+  content: attr(data-title);
+  display: block;
+  padding: 8px 16px;
+  background: var(--vp-c-bg-soft);
+  border-bottom: 1px solid var(--vp-c-divider);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vp-c-text-3);
+}
+
+.vp-doc [class*='language-'] code {
+  font-family: var(--vp-font-family-mono);
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+
+/* inline code */
+.vp-doc :not(pre) > code {
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-weight: 500;
+}
+
+/* blockquote */
+.vp-doc blockquote {
+  border-left: 4px solid var(--vp-c-brand-2);
+  background: var(--vp-c-bg-soft);
+  border-radius: 0 8px 8px 0;
+  padding: 12px 18px;
+  margin: 16px 0;
+}
+
+/* ---------- home button polish ---------- */
+
+.VPButton.brand {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  border-radius: 10px;
+  box-shadow:
+    0 1px 2px rgba(126, 20, 255, 0.16),
+    0 4px 14px -4px rgba(126, 20, 255, 0.45);
+  transition: transform 0.15s ease, box-shadow 0.15s ease,
+              background-color 0.15s ease;
+}
+
+.VPButton.brand:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 1px 2px rgba(126, 20, 255, 0.2),
+    0 8px 22px -4px rgba(126, 20, 255, 0.5);
+}
+
+.VPButton.alt {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  border-radius: 10px;
+}
+
+/* ---------- search box polish ---------- */
+
+.DocSearch-Button,
+#docsearch [aria-label='Search docs'] {
+  border-radius: 10px !important;
+}
+
+.VPNavBarSearch .DocSearch.DocSearch-Button {
+  background-color: var(--vp-c-bg-soft);
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 10px;
+}
+
+/* ---------- TOC outline ---------- */
+
+.VPDocAsideOutline .outline-marker {
+  background-color: var(--vp-c-brand-1) !important;
+}
+
+.VPDocAsideOutline .outline-link.active {
+  color: var(--vp-c-brand-1);
+  font-weight: 600;
+}
+
+/* ---------- footer ---------- */
+
+.VPFooter {
+  border-top: 1px solid var(--vp-c-divider);
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    var(--vp-c-bg-alt) 100%
+  );
+}
+
+/* ---------- selection ---------- */
+
+::selection {
+  background-color: var(--od-purple-200);
+  color: var(--od-purple-900);
+}
+
+.dark ::selection {
+  background-color: rgba(184, 150, 255, 0.32);
+  color: #ffffff;
+}
+
+/* ---------- scrollbar (webkit) ---------- */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--od-ink-300);
+  border-radius: 5px;
+  border: 2px solid var(--vp-c-bg);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--od-purple-400);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background-color: var(--od-ink-700);
+  border-color: var(--vp-c-bg);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: var(--od-purple-500);
+}
+
+/* ---------- responsive home tweak ---------- */
+
+@media (min-width: 960px) {
+  .VPHome .container {
+    max-width: 1280px !important;
+  }
+}
