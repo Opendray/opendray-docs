@@ -1,59 +1,44 @@
-# 活动 — 概览
+---
+kind: concept
+title: 活动 Activity — 概览
+tldr: opendray 系统级事件总线的 tail -f。每个 session / channel / memory / notification 事件滚动经过。按 integration / direction / status / time / topic 过滤。
+status: stable
+since: v0.1.0
+topic: activity
+related: [activity/topics-catalogue, integrations/call-log, integrations/events-ws]
+references:
+  capabilities: [integrations]
+x-implementation: [internal/eventbus/, internal/integration/calllog.go]
+---
 
-Activity 页是 opendray **系统级** 内部事件总线的 `tail -f`。
-每个会话生命周期事件、每个通道入站、每个通知扇出、每个集成
-调用,都实时落在这里。
+# 活动 Activity — 概览
 
-> **不要混淆:** Sessions Inspector 上的 **History** tab,是
-> 一个 *per-project prompt 日志*,数据源自每个 CLI 在磁盘上的
-> transcript。Activity = 事件;History = 用户 prompt。
+> **tldr:** opendray 系统级事件总线的 `tail -f`。每个 session / channel / memory / notification 事件滚动经过。按 integration / direction / status / time / topic 过滤。
 
-## 什么时候用
+## 两种数据源
 
-- 调 "为什么我的 Telegram 通道没通知?" — 看 `session.idle`
-  触发,确认 `channel.message_sent` 紧跟着。
-- 确认一个 slash 命令收到了 — 找带你命令名的
-  `channel.command_received`。
-- 追踪工具转发 — `channel.message_forwarded` 显示
-  channel→session 的输入投递。
-- 实时看集成调用日志滚过。
-- 单纯地观察 — opendray 的行为从这一页高度可见。
+| 源 | 页 tab | 什么 |
+|---|---|---|
+| 事件总线 | Activity → Events | `internal/eventbus/` 的 live 流;短暂 |
+| 调用日志 | Activity → API calls | 持久化到 `integration_call_log` 表 |
 
-![活动页面](/tutorial/activity-layout.png)
+## 顶部过滤器
 
-## 你看到什么
-
-每一行是一个事件:
-
-| 列 | 注意事项 |
+| 过滤 | 源 |
 |---|---|
-| Time | 服务器侧时间戳(UTC)|
-| Topic | 点号命名的事件 id(`session.idle`、`channel.message_sent`、…)|
-| Summary | 从 payload 合成的一行 |
-| Expand | 点行看完整 JSON payload |
+| Integration | 注册的 + `admin` 下拉 |
+| Direction | inbound / outbound / proxied / event |
+| Status | 2xx / 3xx / 4xx / 5xx(API)/ event-type(bus) |
+| 时间范围 | 5m / 1h / 24h / 7d / 自定义 |
+| Topic 模式 | `session.*` / `channel.*.delivery` / `memory.*` 等 |
 
-最新事件在顶部;自动滚动跟随可以切换(默认开)。想读一个
-具体行又不想它滑走时,暂停自动滚动。
+![Activity 布局](/tutorial/activity-layout.png)
 
-## 过滤器
+## 何时用
 
-过滤器栏是客户端的 — 事件无论怎样都通过 WebSocket 持续流入。
-按主题前缀过滤:
-
-- `session.` — 只有会话生命周期事件
-- `channel.` — 通道入站、出站、命令、转发
-- `integration.` — 调用日志 + 认证尝试
-- 任何你通过插件加进来的自定义前缀
-
-过滤器 per-user 粘性;重新加载页面,你的上一个过滤器保留。
-
-## 实时计数
-
-底部栏显示 events/second(在 5s 内平滑)。用来判断是不是
-有事发生 — 静默意味着总线确实安静,不是页面坏了。
-
-## 继续阅读
-
-| 主题 | 章节 |
+| 目标 | 怎么用 |
 |---|---|
-| 每个事件主题 + payload 形状 | 主题清单 |
+| 调试 "为什么我的集成没收到事件?" | 按 integration + topic 过滤 |
+| 合规审计 | 按时间 + integration 过滤 → 导出 CSV |
+| 检测异常集成调用 | 按 5xx 状态过滤 |
+| 追请求过系统 | 搜 `request_id` |

@@ -1,4 +1,16 @@
+---
+kind: concept
+title: 案例展示
+tldr: 真实团队 + 反复出现的使用模式。PR 加你的团队。匿名模式也覆盖。
+status: stable
+since: v0.1.0
+topic: releases
+related: [releases/changelog, releases/roadmap]
+---
+
 # 案例展示
+
+> **tldr:** 真实团队 + 反复出现的使用模式。PR 加你的团队。匿名模式也覆盖。
 
 正在生产环境用 opendray 的团队。在用并希望被列出来,
 [提个 PR](https://github.com/opendray/opendray-docs/edit/main/docs/zh/releases/showcase.md)

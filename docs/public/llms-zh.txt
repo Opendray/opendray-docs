@@ -1,0 +1,108 @@
+# opendray
+
+> opendray is a self-hosted control gateway for AI coding CLIs (Claude Code, Codex, Gemini CLI). It wraps local CLIs and exposes them via REST + WebSocket so web admin, mobile apps, messaging platforms, and your own apps can all drive the same session. One Claude Pro subscription serves your entire personal-app stack instead of per-token billing.
+
+Status: v1.0 stable. Single Go binary. Self-hosted. MIT licensed.
+
+For AI agents: this site exposes machine-readable artifacts at:
+- https://docs.opendray.dev/llms.txt — this file
+- https://docs.opendray.dev/llms-full.txt — concatenated full text of every page
+- https://docs.opendray.dev/openapi.yaml — REST API spec
+- https://docs.opendray.dev/manifest.json — capability listing
+- https://docs.opendray.dev/capabilities/{channels,providers,memory,sessions,integrations}.json
+- https://docs.opendray.dev/mcp-manifest.json — connect via Model Context Protocol
+
+## zh
+
+- [活动 Activity — 概览](https://docs.opendray.dev/zh/activity/overview) [stable]: opendray 系统级事件总线的 tail -f。每个 session / channel / memory / notification 事件滚动经过。按 integration / direction / status / time / topic 过滤。
+- [Topic 目录](https://docs.opendray.dev/zh/activity/topics-catalogue) [stable]: 每个事件 topic + payload schema。session.* / channel.* / memory.* / notification.* / system.*。是 WS subscribe 过滤的权威。
+- [环境记忆 — 捕获规则](https://docs.opendray.dev/zh/ambient-memory/capture-rules) [stable]: 规则 = 匹配(provider / cwd glob / 事件类型)+ 动作(summarize / regex 提取)。每事件可多规则。在 Settings → Ambient Memory 配置。
+- [环境记忆 — 注入档案](https://docs.opendray.dev/zh/ambient-memory/injection) [stable]: 档案 = 注入到 session 初始上下文的内容。3 种模式 — dense(top-K 通过 search)、sparse(仅最近)、off。按 (provider, cwd) 匹配。
+- [环境记忆 — 概览](https://docs.opendray.dev/zh/ambient-memory/overview) [stable]: 自动 capture 引擎 — 从 session 输出提取事实,不需要 agent 自己调 memory_store。基于规则 + LLM 摘要。写到 project/global scope。
+- [环境记忆 — 供应商](https://docs.opendray.dev/zh/ambient-memory/providers) [stable]: 3 个摘要后端 — Anthropic API、OpenAI 兼容 HTTP(Ollama / OpenAI / LocalAI)、noop dry-run 模式。在 [ambient.summarizer] 配置。
+- [备份 — 导出(Plan C)](https://docs.opendray.dev/zh/backup/export) [stable]: /export = 可移植 zip-bundle。解码数据(JSON/markdown),不是 pg_dump。可导入到不同 opendray 主机。AES-GCM 加密。
+- [备份 Backup — 概览](https://docs.opendray.dev/zh/backup/overview) [stable]: 两个安全网 — 加密 pg_dump(全 DB,原地恢复) + zip-bundle 导出(纯数据,跨主机迁移)。两者都 AES-GCM 加密。Opt-in 需要 OPENDRAY_BACKUP_ENABLED。
+- [备份 — 快速开始](https://docs.opendray.dev/zh/backup/quickstart) [stable]: 默认关闭。设 OPENDRAY_BACKUP_ENABLED=1 + OPENDRAY_BACKUP_KEY(32 字节 base64)。重启 → Backups 页出现。加 target → run 一次 dump。
+- [备份 — 恢复(A) 和 导入(C)](https://docs.opendray.dev/zh/backup/restore-and-import) [stable]: /backups → 选 dump → Restore(原地 pg_restore)。/export → 上传 .zip.enc → Import(解密 + 合并)。都需要 OPENDRAY_BACKUP_KEY。
+- [备份 — 调度](https://docs.opendray.dev/zh/backup/schedules) [stable]: cron 表达式触发备份 run。扇出到所有 enabled target。每次成功上传后跑 retention 修剪。默认 `0 2 * * *`(每天凌晨 2 点)。
+- [备份 — Targets](https://docs.opendray.dev/zh/backup/targets) [stable]: 加密 bundle 落到哪。8 种 target — local-fs / S3 / R2 / B2 / GCS / Azure Blob / SMB / SFTP。每个独立 retention + cron。
+- [Bridge — 通过 WebSocket 接入自定义平台](https://docs.opendray.dev/zh/channels/bridge) [stable]: Channels → New → kind=bridge → 保存 WS URL + token → 用任何语言跑一个 adapter。Adapter 说 opendray 的 WS 协议,opendray 把它当普通 channel。
+- [钉钉 DingTalk](https://docs.opendray.dev/zh/channels/dingtalk) [stable]: 钉钉群加自定义群机器人 → 保存 webhook URL + SEC 签名密钥 → Channels → New → kind=dingtalk 粘进去。仅出站 — 没入站回复,没回调按钮。
+- [Discord](https://docs.opendray.dev/zh/channels/discord) [stable]: 创建 Discord app + bot → 开 Message Content Intent → 邀请到服务器 → Channels → New → kind=discord 粘 token。Gateway WS,不需要公网 URL。
+- [飞书 Feishu / Lark](https://docs.opendray.dev/zh/channels/feishu) [stable]: 创建飞书 app → 拿 App ID + Secret → 把 opendray 的 webhook URL 注册到 Event Subscriptions → 把 bot 加进群。需要公网 HTTPS URL。
+- [Notifications 面板](https://docs.opendray.dev/zh/channels/notifications) [stable]: 按 channel 控制 — 哪些会话事件触发(started / idle / ended / permission_ask)、多久一次(repeat 策略)、带什么内容(终端 snippet)。
+- [频道 Channels — 概览](https://docs.opendray.dev/zh/channels/overview) [stable]: 一个 channel = 一份消息平台绑定。opendray 内置 7 个 kind(telegram / slack / discord / feishu / dingtalk / wecom / bridge),共享同一套 notify + repeat-policy 语义。
+- [多会话路由](https://docs.opendray.dev/zh/channels/routing) [stable]: channel 里回复时,opendray 按优先级选目标会话 — reply-to-message > /select 固定 > 最近通知。Slash 命令永远优先于路由。
+- [Slack](https://docs.opendray.dev/zh/channels/slack) [stable]: 创建 Slack app → 开 Socket Mode → 拿 xoxb + xapp token → Channels → New → kind=slack 粘进去。不需要公网 URL。
+- [Telegram](https://docs.opendray.dev/zh/channels/telegram) [stable]: 从 @BotFather 拿 bot token,粘到 Channels → New → kind=telegram 即可。long-poll,不需要公网 URL。
+- [企业微信 WeCom](https://docs.opendray.dev/zh/channels/wecom) [stable]: 企业微信群加群机器人 → 保存 webhook URL → Channels → New → kind=wecom 粘进去。仅出站 — 没入站,没回调按钮。
+- [认证](https://docs.opendray.dev/zh/consuming/authentication) [stable]: Bearer token 在 Authorization header。两种 — admin(od_admin_xxx)和集成(od_live_xxx)。401 code — unauthenticated / key_revoked / key_expired。403 — insufficient_scope。
+- [错误处理](https://docs.opendray.dev/zh/consuming/error-handling) [stable]: 所有错误用同一个信封,含 code / message / hint / request_id。code 程序化匹配;message 可能变。hint 可直接给用户看。
+- [密钥轮换](https://docs.opendray.dev/zh/consuming/key-rotation) [stable]: POST /api/v1/integrations/{id}/rotate → 返回新 key + 24h grace 期(旧 key 仍可用)。按计划轮换或怀疑泄露时轮换。
+- [接入 opendray — 概览](https://docs.opendray.dev/zh/consuming/overview) [stable]: 第三方开发者构建调用 opendray 的 app 的指南。注册集成 → scope key → REST/WS API。一份 Claude Pro 订阅替代按 token 计费。
+- [接入 Quickstart](https://docs.opendray.dev/zh/consuming/quickstart) [stable]: 注册集成 → 保存 API key → curl POST /api/v1/sessions → 用 WS 跟随。5 分钟端到端。
+- [REST API 参考](https://docs.opendray.dev/zh/consuming/rest-api) [beta]: 所有面向消费方的端点。Sessions / channels / memory / integrations。权威源 — /openapi.yaml。
+- [Scope 参考](https://docs.opendray.dev/zh/consuming/scopes) [stable]: 枚举每个 scope id、路由映射、模式(read / write / send / subscribe)。权威源 — /capabilities/integrations.json。
+- [TypeScript SDK](https://docs.opendray.dev/zh/consuming/typescript-sdk) [beta]: @opendray/sdk — npm install + new OpenDray(baseURL, apiKey) → sessions / channels / memory / events 方法。从 OpenAPI 自动生成;仅 ESM。
+- [事件订阅](https://docs.opendray.dev/zh/consuming/websocket-events) [stable]: WS 在 /api/v1/integrations/_events。订阅 session.* / channel.* / memory.* topic 模式。无 replay — 用 REST events?since=<seq> 回填。
+- [给 AI agents](https://docs.opendray.dev/zh/for-ai) [stable]: 本站把文档以机器可读格式发布,AI 不需要解析 HTML 就能消费 opendray 文档。
+- [欢迎使用 opendray](https://docs.opendray.dev/zh/getting-started/welcome) [stable]: AI 编程 CLI(Claude Code / Codex / Gemini / shell)的自托管控制网关。Web 后台 + 移动 + REST/WS API + 8 messenger + 记忆 + 集成。单 Go 二进制跑你自己硬件。
+- [opendray — AI 编程 CLI 的自托管控制网关](https://docs.opendray.dev/zh): 在家里的服务器上跑 Claude Code、Codex、Gemini CLI;从网页、手机、Telegram、Slack、飞书、钉钉、企业微信驱动它们。自托管、本地优先、完全开源。
+- [Auth 模型](https://docs.opendray.dev/zh/integrations/auth-model) [stable]: 两种 token — admin bearer(全 UI 访问)+ 集成 API key(限 scope)。Bearer 在 Authorization header。opendray 在反代请求里加 X-Integration-ID。
+- [集成调用日志](https://docs.opendray.dev/zh/integrations/call-log) [stable]: Per-集成 审计轨迹。跟 audit_log 分表为减压。字段 — timestamp、integration_id、direction、method、path、status、latency_ms、resource_kind/id。
+- [事件 WebSocket](https://docs.opendray.dev/zh/integrations/events-ws) [stable]: /api/v1/integrations/_events 流式推 session/channel/memory 事件。Bearer 集成 key 认证。连接时 topic 过滤。25s keepalive。
+- [集成 Integrations — 概览](https://docs.opendray.dev/zh/integrations/overview) [stable]: opendray = 受管反向代理 + scope 限权 API key + 事件 WS。你的 pettracker / materialscout 应用注册成集成,共享一份 Claude Pro 订阅,有独立审计。
+- [反向代理](https://docs.opendray.dev/zh/integrations/reverse-proxy) [stable]: 任意 HTTP 后端挂在 opendray 之后。/api/v1/proxy/<prefix>/* → <integration.base_url>/*。opendray 注入 X-Integration-ID,剥离入站 Authorization,应用 scope 检查。
+- [记忆配置](https://docs.opendray.dev/zh/memory/configuration) [stable]: [memory] in config.toml + Settings → Server → Memory。选 backend(auto / bm25 / http)、默认 scope、top-k、相似度阈值。零配置 = BM25 + pgvector + project scope。
+- [LM Studio 实操](https://docs.opendray.dev/zh/memory/lmstudio-walkthrough) [stable]: LM Studio = Ollama 的 GUI 替代品。开本地 server、加载 nomic-embed-text-v1.5、opendray [memory.http] 指向 1234 端口。
+- [本地 ONNX 嵌入](https://docs.opendray.dev/zh/memory/local-onnx) [experimental]: 用 -tags local_onnx 编译 → 本地嵌入 bge-m3(1024 维),不需要 HTTP 服务。二进制更大(~50MB)但运行时无外部依赖。
+- [记忆 — 维护](https://docs.opendray.dev/zh/memory/maintenance) [stable]: 三件运维事 — embedder 迁移(切换后端后)、冲突解析(默认 newer-wins)、清理队列(stale / superseded / conflict 行)。
+- [Claude 本地记忆镜像](https://docs.opendray.dev/zh/memory/mirror) [stable]: 每个 spawn 时 opendray 读 Claude 本地 memory markdown,以 project-scope 行写入 pgvector,让 Codex / Gemini 也能搜到。
+- [Ollama 实操](https://docs.opendray.dev/zh/memory/ollama-walkthrough) [stable]: 本地跑 Ollama → 拉 nomic-embed-text → opendray [memory.http] 指过去 → 重启。免费、语义搜索、无 API key。
+- [Memory — 概览](https://docs.opendray.dev/zh/memory/overview) [stable]: 跨 CLI 持久化记忆层。opendray 在每个会话自动 attach 一个 memory MCP server。同 cwd 的 Claude / Codex / Gemini 互相看到对方的事实。默认后端 BM25(纯 Go,无模型,无 API key)。
+- [Memory — 快速上手](https://docs.opendray.dev/zh/memory/quickstart) [stable]: 记忆默认开启 — 无 flag、无服务、无 API key。spawn 任意会话 → opendray 自动 attach memory MCP server → agent 可 search/store。在 Memory 页(🧠 侧栏,快捷键 g m)验证。
+- [记忆 scope](https://docs.opendray.dev/zh/memory/scopes) [stable]: 三种 scope — session(scope_key=session_id)、project(scope_key=cwd,默认)、global(无 key)。按共享 vs 隔离需求选。
+- [记忆故障排查](https://docs.opendray.dev/zh/memory/troubleshooting) [stable]: 症状 → 可能原因 → 修复。最常见 6 种记忆故障模式的速查表。
+- [记忆 worker — 概览](https://docs.opendray.dev/zh/memory-workers/overview) [stable]: 后台 LLM worker,驱动 ambient capture / 摘要 / 项目记忆 scanner。可插拔分 task — Haiku 便宜、Sonnet 难活、本地 llama 免费。
+- [按 task 挑 worker](https://docs.opendray.dev/zh/memory-workers/picking-a-worker) [stable]: 有观点的表 — 给每个后台 task 派什么。默认偏向 Haiku(质量 / 成本平衡);Ollama 免费;Sonnet 只给 conflict resolution。
+- [Worker 验证 & 指标](https://docs.opendray.dev/zh/memory-workers/verification) [stable]: /memory/workers 显示 per-worker 队列深度、成功率、p95 延迟、成本。每 worker 一个手动"Run now"。失败进 DLQ。
+- [笔记编辑器](https://docs.opendray.dev/zh/notes/editor) [stable]: Markdown 编辑器,Source/Preview tab,1s 防抖自动保存,wiki-link 自动补全,代码块语法高亮,图片粘贴。Notes 页 + Inspector linked-note pane 共用。
+- [笔记 Notes — 概览](https://docs.opendray.dev/zh/notes/overview) [stable]: opendray 主机上的 Obsidian 兼容 markdown vault。每会话 linked 笔记自动创建。Wiki link + backlink。可选 git 同步。Claude 可读回作上下文。
+- [Vault git 同步](https://docs.opendray.dev/zh/notes/vault-git-sync) [stable]: 可选。Vault 是 git repo。opendray 按计划自动 commit + push。Session spawn 时 pull。合并冲突在 UI 浮出,手动解决。
+- [Wiki 链接 + backlink](https://docs.opendray.dev/zh/notes/wiki-links) [stable]: [[note-name]] 语法。按文件名解析(大小写不敏感,忽略路径)。[[ 触发自动补全。右栏显示 incoming backlink。保存时重算。
+- [Git host 适配器](https://docs.opendray.dev/zh/plugins/git-hosts) [stable]: GitHub / Gitea / GitLab 集成 — PAT 或 OAuth。笔记 vault 同步、Sessions Git tab、PR 命令用。Per-host scope。加密落盘。
+- [MCP servers](https://docs.opendray.dev/zh/plugins/mcp) [stable]: 注册 MCP server(stdio 命令或 HTTP URL)。opendray 渲染 per-session mcp.json,自动 attach(如 opendray-memory)+ 你注册的。Claude/Codex/Gemini 按各自 supportsMcp flag 消费。
+- [插件 Plugins — 概览](https://docs.opendray.dev/zh/plugins/overview) [stable]: 工具扩展,自动注入每个 spawn 的会话。3 种 — Skills(markdown)、MCP servers(stdio/http)、Git host 适配器(GitHub/Gitea/GitLab)。
+- [Skills](https://docs.opendray.dev/zh/plugins/skills) [stable]: 给 Claude 调用的 markdown 程序。从 builtin(嵌二进制)+ vault(运维编辑)加载。spawn 时注入系统 prompt。opendray skill CLI 列出/加载。
+- [项目记忆 — 概览](https://docs.opendray.dev/zh/project-memory/overview) [stable]: 在 raw memory rows 之上的 per-cwd 结构化层。由 scanner + cleaner worker 自动管理。每个项目一页,呈现 goals / decisions / state。
+- [项目记忆 — 重置 & 排查](https://docs.opendray.dev/zh/project-memory/reset-and-troubleshooting) [stable]: 重置 = 清一个 cwd 的项目记忆行(raw 记忆保留)。4 种常见故障模式 + 修复。
+- [扫描器 & 清理器 — 自动管理](https://docs.opendray.dev/zh/project-memory/scanner-and-cleaner) [stable]: 两个 worker — scanner 把 raw 行提升到项目记忆段落,cleaner 删 stale / resolved。在 [project_memory.scanner] 和 [.cleaner] 配置。
+- [项目记忆 — 工作流](https://docs.opendray.dev/zh/project-memory/workflow) [stable]: 打开 /memory/project → 选 cwd → 看段落(Goals / Decisions / State)。内联编辑、标问题为已解决、导出段落到 Markdown。
+- [内置 providers](https://docs.opendray.dev/zh/providers/bundled) [stable]: 每个 CLI 的参考。claude(anthropic,JSONL + 多账号 + MCP)、codex(openai,opaque PTY)、gemini(google,env 认证)、shell($SHELL 兜底)。
+- [Claude 账号](https://docs.opendray.dev/zh/providers/claude-accounts) [stable]: 多账号 Claude — 每账号一个 ~/.claude-accounts/<name>/ 目录。opendray 按 spawn 设 CLAUDE_CONFIG_DIR。会话 / 记忆 / 笔记 / 频道跨账号共享,只有 OAuth 身份是 per-账号。
+- [自定义 provider manifest](https://docs.opendray.dev/zh/providers/custom) [stable]: 丢一个 JSON manifest 到 internal/catalog/builtin/(编译期)或 POST 到 /api/v1/catalog/providers(运行时)→ 新 CLI 出现在 spawn 下拉。
+- [Providers — 概览](https://docs.opendray.dev/zh/providers/overview) [stable]: provider = opendray 能拉起的 CLI 二进制目录定义。内置 4 个(claude / codex / gemini / shell)。运行时可改 exec path / args / env,override 写 DB,叠加在内置 JSON manifest 之上。
+- [错误码](https://docs.opendray.dev/zh/reference/errors) [stable]: REST + WS API 返回的所有错误码目录。信封 { error: { code, message, hint, request_id } }。code 程序化匹配。
+- [API 参考 — 总览](https://docs.opendray.dev/zh/reference/overview) [stable]: REST + WebSocket API 面。Auth = Bearer admin 或 集成 key。/api/v1 路径版本化。Per-key 限流。权威 spec — /openapi.yaml。
+- [限流](https://docs.opendray.dev/zh/reference/rate-limits) [stable]: per 集成 key token bucket。默认 10 req/s 持续,30 突发。按 tier 覆盖(service 100/300)。Per-端点 更严。X-RateLimit-* header + 429 时 Retry-After。
+- [REST 端点](https://docs.opendray.dev/zh/reference/rest) [beta]: 管理 sessions / channels / providers / memory / integrations 的同步 HTTP API。Authorization header 里 Bearer key 认证。权威源 — /openapi.yaml。
+- [WebSocket 事件](https://docs.opendray.dev/zh/reference/websocket) [beta]: 长连接事件流。Bearer 认证。订阅 topic 模式。25s keepalive。无 replay — 用 REST events?since=<seq> 回填。
+- [更新日志](https://docs.opendray.dev/zh/releases/changelog) [stable]: 每版本的显著变更。权威源 — GitHub releases。SemVer。Major = breaking,minor = additive,patch = fixes。
+- [路线图](https://docs.opendray.dev/zh/releases/roadmap) [stable]: 即将到来工作的高层 "why"。Now / Soon / Later 列。GitHub project board 是粒度追踪。
+- [案例展示](https://docs.opendray.dev/zh/releases/showcase) [stable]: 真实团队 + 反复出现的使用模式。PR 加你的团队。匿名模式也覆盖。
+- [Git 工作流](https://docs.opendray.dev/zh/sessions/git-workflow) [stable]: Inspector Git tab = 自包含 PR 命令中心。切分支 / 暂存 / commit / push / PR 创建 / 合并 / check 状态 — 全程不离开 opendray。端点在 /api/v1/git/。
+- [Inspector 面板](https://docs.opendray.dev/zh/sessions/inspector) [stable]: 右侧可折叠面板,7 个子 tab(Files / Git / Search / Tasks / History / Notes / Memory)。全部 scope 到会话的 cwd。可调宽 320–900px,每用户持久化。
+- [会话生命周期](https://docs.opendray.dev/zh/sessions/lifecycle) [stable]: STARTING → RUNNING ↔ IDLE → STOPPED / ENDED / FAILED。Idle = N 秒无输出(默认 30s),进程仍活。Restart 用同 provider/cwd/args 在新 session id 下重 spawn。
+- [移动端 Git 工作流](https://docs.opendray.dev/zh/sessions/mobile-git) [stable]: Flutter app 以触摸优先布局镜像 web Git tab。底部 sheet 分支选择器、stage-all 提交、polling 频率为移动 radio 调优。同一组 gateway 路由。
+- [多端会话访问](https://docs.opendray.dev/zh/sessions/multi-client) [stable]: 同一会话可被多端 attach(web + 手机 + Telegram),但同一时刻只应一端 DRIVE。PTY 只有一种 size — 最后 resize 赢。要独立状态,在同 cwd spawn 多个 session。
+- [会话 Sessions — 概览](https://docs.opendray.dev/zh/sessions/overview) [stable]: Sessions 页是 opendray 日常工作台。每个 CLI 进程一个 tab — PTY-backed,1 MiB ring buffer,多端镜像,断线安全。DB 会话行的生命周期长于进程。
+- [启动会话](https://docs.opendray.dev/zh/sessions/spawning) [stable]: Sessions → + New → 选 provider + cwd +(可选)name / args / claude_account / bypass / parent_session → Spawn。opendray 验证 cwd,fork PTY,首字节(或 500ms 超时)后标记 RUNNING。
+- [Tab 与键盘导航](https://docs.opendray.dev/zh/sessions/tabs) [stable]: 点击 / 拖 / 右键 tab。vim 风格 g 前缀快捷键。Ctrl+Tab 切换、Ctrl+1-9 跳转、Ctrl+W 关闭、n s 打开 Spawn、g i 切换 Inspector。
+- [设置 — 通用](https://docs.opendray.dev/zh/settings/general) [stable]: 网络绑定(host/port/TLS)、admin 密码、locale 默认。网络变更需重启;admin 密码立即生效。
+- [设置 — 键盘 & 主题](https://docs.opendray.dev/zh/settings/keyboard-and-theme) [stable]: 每用户(浏览器 local)。主题 — light/dark/system。键盘 — vim/emacs/none。持久化到 localStorage,跨 tab 同步。
+- [设置 — 日志](https://docs.opendray.dev/zh/settings/logging) [stable]: 级别(trace/debug/info/warn/error/off) + 格式(json/text) + 目标(stdout/file/syslog)。SIGHUP 热加载级别。UI 里有 live tail。
+- [设置 Settings — 概览](https://docs.opendray.dev/zh/settings/overview) [stable]: 3 组 — User(主题、键盘、locale)、Server(日志、存储路径、重启)、Session defaults(per-provider runtime)。能热加载的热加载;其余要重启。
+- [设置 — 重启](https://docs.opendray.dev/zh/settings/restart) [stable]: 某些 config 改动(网络、存储路径、备份、记忆 backend)需要重启。Settings → Restart 有个守卫按钮,drain in-flight 后触发 SIGTERM。
+- [设置 — 会话默认](https://docs.opendray.dev/zh/settings/session-defaults) [stable]: per-provider runtime 默认。claude 的 bypass_permissions / max_turns / skills。下次 spawn 生效。per-session 可覆盖。
+- [设置 — 存储路径](https://docs.opendray.dev/zh/settings/storage-paths) [stable]: opendray 把文件放哪 — notes vault、runtime / session 临时、claude 账号目录、backup staging。默认 $HOME/.opendray。改动需重启。
+

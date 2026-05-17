@@ -1,33 +1,51 @@
-# 插件 — 概览
+---
+kind: concept
+title: 插件 Plugins — 概览
+tldr: 工具扩展,自动注入每个 spawn 的会话。3 种 — Skills(markdown)、MCP servers(stdio/http)、Git host 适配器(GitHub/Gitea/GitLab)。
+status: stable
+since: v0.1.0
+topic: plugins
+related: [plugins/skills, plugins/mcp, plugins/git-hosts]
+references:
+  capabilities: [providers]
+x-implementation: [internal/plugins/]
+---
 
-Plugins 页注册的是工具扩展,opendray 会在会话拉起时把它们
-注入到兼容的 CLI 会话里。这里有三类插件:
+# 插件 Plugins — 概览
 
-| 插件类型 | 做什么 |
+> **tldr:** 工具扩展,自动注入每个 spawn 的会话。3 种 —— Skills(markdown)、MCP servers(stdio/http)、Git host 适配器(GitHub/Gitea/GitLab)。
+
+## 三种插件
+
+| 种类 | 什么 | 注入为 |
+|---|---|---|
+| [Skills](./skills) | 可复用的 markdown 程序,Claude 可调用 | 系统 prompt 前缀 |
+| [MCP servers](./mcp) | 说 Model Context Protocol 的外部工具 | session 的 `mcp.json` 里的 MCP server 条目 |
+| [Git host adapters](./git-hosts) | GitHub / Gitea / GitLab API 包装 | Inspector 的 Git tab + Sessions Git workflow |
+
+## 注册位置
+
+| 种类 | UI |
 |---|---|
-| **Skill** | 可复用的 prompt / 模式(markdown 文件),Claude 可以作为 slash 命令调用 |
-| **MCP 服务器** | Model Context Protocol 服务器,向兼容的 CLI 暴露工具目录 |
-| **Git 主机** | 远程 git 推送的凭据(vault 同步、代码库克隆) — 笔记 vault 和集成那边都用 |
+| Skills | `/plugins` → Skills tab → builtin + vault-based |
+| MCP servers | `/plugins` → MCP tab → stdio 命令 或 HTTP URL |
+| Git hosts | `/settings/git-hosts` → per-host PAT / OAuth |
 
-![插件页面](/tutorial/plugins-layout.png)
+## 自动注入
 
-## 继续阅读
+| 种类 | 何时 | 在哪 |
+|---|---|---|
+| Skills | session spawn | 系统 prompt 前缀 |
+| MCP servers | session spawn | 渲染到临时 session 目录的 `mcp.json` |
+| Git host | Git tab 打开时 | 从 settings store 读 |
 
-| 主题 | 章节 |
-|---|---|
-| Skill 目录 + slash 命令注册 | Skill |
-| MCP 服务器目录 + 密钥保险库 | MCP |
-| 给 git remote 用的 SSH key / HTTPS PAT | Git 主机 |
+## Per-provider 支持
 
-## 插件状态存在哪儿
+| Provider | Skills | MCP | Git tab |
+|---|---|---|---|
+| `claude` | ✓(经系统 prompt) | ✓ | ✓ |
+| `codex` | ✓ | ✓ 如 `supportsMcp` | ✓ |
+| `gemini` | ✓ | ✗ | ✓ |
+| `shell` | ✗ | ✗ | ✓ |
 
-| 插件 | 存储 |
-|---|---|
-| Skill | `~/.opendray/vault/skills/` 下的 markdown 文件(由 vault 管理,通过 git 同步)|
-| MCP 服务器 | `~/.opendray/mcp/servers.json` 里的 JSON 配置 |
-| MCP 密钥 | 加密文件 `~/.opendray/secrets.env`(密钥在 OS keychain)|
-| Git 主机 | Postgres `git_hosts` 表;HTTPS token 在同一个密钥保险库里 |
-
-这种切分是有意的:skill 内容在 vault 里(所以多主机同步直接
-就能用),但密钥材料留在 per-host 的、被 OS keychain 保护的
-保险库里。
+![Plugins 页](/tutorial/plugins-layout.png)

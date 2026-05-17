@@ -1,98 +1,61 @@
-# Auth model
+---
+kind: capability
+title: Integration auth model
+tldr: Two token types — admin bearer (full UI access) + integration API key (scoped). Bearer in Authorization header. opendray adds X-Integration-ID header to proxied requests.
+status: stable
+since: v0.1.0
+topic: integrations
+related: [integrations/overview, integrations/reverse-proxy, consuming/authentication]
+capability: [admin-bearer, integration-key, scope-enforcement]
+inbound: http-bearer
+outbound: header-injection
+x-implementation: [internal/auth/, internal/integration/middleware.go]
+---
 
-opendray's API has two token types, applied through a dual-auth
-middleware. Understanding the precedence + scoping prevents most
-"why is this call returning 401?" debugging sessions.
+# Integration auth model
 
-## Admin token (full access)
+> **tldr:** Two token types — admin bearer (full UI access) + integration API key (scoped). Bearer in `Authorization` header. opendray adds `X-Integration-ID` header to proxied requests.
 
-The admin token is set at startup via:
+## Token types
 
-- `[auth].password` (legacy — actually the bearer for `/login`)
-- env var `OPENDRAY_ADMIN_TOKEN` for non-web callers
-- Or generated and shown once on first run
+| Type | Used by | Scope | Header |
+|---|---|---|---|
+| Admin bearer | the operator (web UI, CLI tools) | everything | `Authorization: Bearer od_admin_xxx` |
+| Integration key | external apps you wrote | declared scopes | `Authorization: Bearer od_live_xxx` |
 
-Used by:
+## Scope vocabulary
 
-- The web admin UI (after login)
-- Any admin-CLI script
-
-The admin token bypasses **every** auth check. With it, you can
-hit any `/api/v1/*` endpoint, including destructive ones like
-DELETE on a session row.
-
-Rotate from **Settings → Auth → Rotate admin password**. The new
-value invalidates every web session immediately — operators get
-kicked out and need to re-login.
-
-## Integration keys (scoped)
-
-Per-integration bearer tokens. Created from the Integrations page:
-
-1. **New integration** → name (e.g. `grafana-webhook-receiver`).
-2. opendray generates a random 32-byte hex key, hashes it, and
-   stores only the hash. The plaintext is shown **once** in a
-   modal — copy it now or rotate immediately.
-3. Pick scopes (which `/api/v1/*` paths the key may hit). Default
-   is "all read-only routes" — narrow it for production keys.
-4. Save.
-
-![Integration key reveal modal](/tutorial/integration-key-reveal.png)
-
-The card shows the key id (visible) + a masked preview of the
-plaintext. **Rotate** generates a new plaintext and invalidates
-the old one immediately.
-
-## How the middleware decides
-
-Request hits opendray with `Authorization: Bearer <token>`.
-
-1. `auth.Middleware` checks if the token equals the admin token
-   → set `principal=admin`, continue.
-2. Otherwise call `integration.Service.AuthenticateKey(token)`.
-   Looks up the hash in the integration table. If found and
-   the integration is `enabled` → set `principal=integration:<id>`.
-3. Otherwise → 401.
-
-Once the principal is set, the **call logger middleware** wraps
-the response handler. After the response is written, it appends
-a row to `integration_call_log` with:
-
-- principal (admin or integration id)
-- request method + path
-- response status code
-- duration
-- request id (for correlation with the structured log)
-
-Admin requests are **excluded** from the call log by default —
-the table is for tracking external tools, not the operator
-clicking around the admin.
-
-## Scoping integration keys
-
-Three scope models supported:
-
-| Scope | Meaning |
+| Scope | Lets the key |
 |---|---|
-| `read` | GET requests to all `/api/v1/*` |
-| `write` | + POST/PATCH/DELETE on non-destructive routes |
-| `admin` | Equivalent to admin token (use sparingly) |
+| `session:read` | list/get sessions, tail PTY |
+| `session:write` | spawn / send input / terminate |
+| `channel:read` | list channels |
+| `channel:send` | ad-hoc send via channel |
+| `memory:read` | query memory store |
+| `memory:write` | write project/global scope |
+| `event:subscribe:session.*` | WS subscribe to session events |
+| `event:subscribe:channel.*` | WS subscribe to channel events |
+| `event:subscribe:memory.*` | WS subscribe to memory events |
 
-The future direction is per-route ACLs but for now the three
-levels cover most cases. Hard-restrict with reverse-proxy mounts
-when you need a single endpoint exposed to a single integration.
+See [/capabilities/integrations.json](/capabilities/integrations.json) for the authoritative list.
 
-## Common gotchas
+## Per-request validation
 
-- **401 right after rotate** — the rotated key invalidates the
-  old one immediately. Update the consuming tool's config.
-- **Two integrations sharing the same name** — the *display
-  name* allows duplicates, but the *id* is unique. The list
-  shows both; rotate / archive the duplicate.
-- **Token in URL** — opendray accepts `?token=` query for the
-  events WebSocket only (browsers can't set headers on a WS
-  upgrade). For all other endpoints use the Authorization
-  header.
-- **Trailing whitespace** — copying from a terminal often
-  appends a newline. The middleware trims, but verify when
-  debugging "wrong" tokens.
+| # | Step |
+|---|---|
+| 1 | Extract bearer token from `Authorization` header |
+| 2 | Reject if missing → 401 `unauthenticated` |
+| 3 | Look up token type + scopes |
+| 4 | Match route's required scope against key's scopes |
+| 5 | Reject if not in set → 403 `insufficient_scope` |
+| 6 | Inject `X-Integration-ID` (proxy routes only) |
+| 7 | Log to `integration_call_log` |
+
+## Errors
+
+| code | http | cause | fix |
+|---|---|---|---|
+| `unauthenticated` | 401 | missing/malformed `Authorization` header | add `Bearer od_*` |
+| `key_revoked` | 401 | key rotated or deleted | re-mint via Integrations page |
+| `key_expired` | 401 | past `expires_at` | re-mint or extend |
+| `insufficient_scope` | 403 | key lacks scope required for route | add scope when re-minting |

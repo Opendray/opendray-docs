@@ -1,111 +1,164 @@
+---
+kind: endpoint
+title: REST API reference
+tldr: All consumer-facing endpoints. Sessions / channels / memory / integrations. Authoritative source — /openapi.yaml.
+status: beta
+since: v0.1.0
+topic: consuming
+related:
+  - consuming/overview
+  - consuming/authentication
+  - consuming/scopes
+  - reference/rest
+  - reference/overview
+operations:
+  - operationId: listSessions
+    method: GET
+    path: /api/v1/sessions
+    summary: List sessions visible to caller
+    tags: [sessions]
+    x-required-scope: session:read
+  - operationId: spawnSession
+    method: POST
+    path: /api/v1/sessions
+    summary: Spawn new CLI session
+    tags: [sessions]
+    x-required-scope: session:write
+  - operationId: terminateSession
+    method: DELETE
+    path: /api/v1/sessions/{id}
+    summary: SIGTERM the session
+    tags: [sessions]
+    x-required-scope: session:write
+  - operationId: sendSessionInput
+    method: POST
+    path: /api/v1/sessions/{id}/input
+    summary: Send text to session stdin
+    tags: [sessions]
+    x-required-scope: session:write
+  - operationId: listChannels
+    method: GET
+    path: /api/v1/channels
+    summary: List configured channels
+    tags: [channels]
+    x-required-scope: channel:read
+  - operationId: sendChannelMessage
+    method: POST
+    path: /api/v1/channels/{id}/send
+    summary: Push a message through a channel
+    tags: [channels]
+    x-required-scope: channel:send
+  - operationId: recallMemory
+    method: POST
+    path: /api/v1/memory/recall
+    summary: Ranked memory search
+    tags: [memory]
+    x-required-scope: memory:read
+  - operationId: registerIntegration
+    method: POST
+    path: /api/v1/integrations
+    summary: Register a new external integration
+    tags: [integrations]
+    x-required-scope: integration:write
+  - operationId: rotateIntegrationKey
+    method: POST
+    path: /api/v1/integrations/{id}/rotate
+    summary: Rotate the integration's API key
+    tags: [integrations]
+    x-required-scope: integration:write
+x-implementation:
+  - internal/gateway/
+  - docs/public/openapi.yaml
+---
+
 # REST API reference
 
-This is the consumer-facing endpoint surface — everything an
-integration's API key can drive. Endpoints not listed here are
-admin-only.
+> **tldr:** All consumer-facing endpoints. Sessions / channels / memory / integrations. Authoritative source — [/openapi.yaml](/openapi.yaml).
 
-All paths are relative to the `/api/v1` base. All responses are
-JSON unless noted.
+## Quick table
 
-## Auth
-
-| Method | Path | Purpose | Body shape |
+| Method | Path | Scope | Tag |
 |---|---|---|---|
-| POST | `/auth/login` | Mint admin token | `{username, password}` → `{token, expires_at, username}` |
+| GET | `/api/v1/sessions` | `session:read` | sessions |
+| POST | `/api/v1/sessions` | `session:write` | sessions |
+| GET | `/api/v1/sessions/{id}` | `session:read` | sessions |
+| DELETE | `/api/v1/sessions/{id}` | `session:write` | sessions |
+| POST | `/api/v1/sessions/{id}/input` | `session:write` | sessions |
+| GET | `/api/v1/sessions/{id}/events?since=<seq>` | `session:read` | sessions |
+| GET | `/api/v1/channels` | `channel:read` | channels |
+| POST | `/api/v1/channels` | `channel:write` | channels |
+| POST | `/api/v1/channels/{id}/send` | `channel:send` | channels |
+| POST | `/api/v1/memory/recall` | `memory:read` | memory |
+| POST | `/api/v1/memory/store` | `memory:write` | memory |
+| GET | `/api/v1/integrations` | `integration:read` | integrations |
+| POST | `/api/v1/integrations` | `integration:write` | integrations |
+| POST | `/api/v1/integrations/{id}/rotate` | `integration:write` | integrations |
+| GET | `/api/v1/integrations/_events` (WS) | `event:subscribe:*` | integrations |
+| GET | `/api/v1/proxy/{prefix}/*` | per-route | proxy |
+| GET | `/api/v1/health` | (none) | activity |
+| GET | `/api/v1/openapi.json` | (none) | meta |
 
-## Sessions
+## Pagination
 
-| Method | Path | Scope | Notes |
-|---|---|---|---|
-| GET    | `/sessions` | `session:read` | List all sessions in any state. Returns `{sessions: [...]}` |
-| GET    | `/sessions/{id}` | `session:read` | Single session view |
-| POST   | `/sessions` | `session:create` | Spawn. Body: `{name, provider_id, cwd, args?, claude_account_id?}` |
-| POST   | `/sessions/{id}/start` | `session:create` | Re-spawn an ended/stopped row |
-| POST   | `/sessions/{id}/stop` | `session:create` | SIGTERM the PTY but keep the row |
-| DELETE | `/sessions/{id}` | `session:create` | Stop + delete the row |
-| POST   | `/sessions/{id}/input` | `session:input` | Body: `{data: string}`. Bytes go straight into PTY stdin |
-| POST   | `/sessions/{id}/resize` | `session:input` | Body: `{cols, rows}` |
-| GET    | `/sessions/{id}/buffer?since=N` | `session:read` | Raw bytes from the PTY ring buffer |
-| GET    | `/sessions/{id}/stream` | `session:read` | WS upgrade — live stdout |
-| GET    | `/sessions/{id}/history?limit=N` | `session:read` | Project-level prompt history (Claude/Codex/Gemini only) |
-| PATCH  | `/sessions/{id}/claude-account` | `session:create` | Switch the Claude account binding |
-
-### `provider_id` values
-
-| Value | Spawns |
-|---|---|
-| `shell` | The user's `$SHELL` (zsh, bash, …) |
-| `claude` | Claude Code CLI |
-| `codex` | OpenAI Codex CLI |
-| `gemini` | Google Gemini CLI |
-
-For Claude/Codex/Gemini opendray has to know the CLI is installed
-on the gateway host. See [Providers](#providers-overview) for
-discovery + per-provider catalog.
-
-## Channels
-
-| Method | Path | Scope | Notes |
-|---|---|---|---|
-| GET    | `/channels` | (none — admin-only listing) | Listed for completeness — channel CRUD is admin-only |
-| POST   | `/channels/{id}/notify` | `channel:send` | Body: `{title, body, level?}` |
-| POST   | `/channels/{id}/send` | `channel:send` | Send a free-form message |
-| POST   | `/channels/{id}/inbound` | `channel:receive` | Webhook receiver (provider-specific signature verification) |
-
-## Catalog + providers
-
-| Method | Path | Scope |
-|---|---|---|
-| GET | `/catalog` | `provider:read` |
-| GET | `/catalog/providers` | `provider:read` |
-| GET | `/catalog/providers/{id}` | `provider:read` |
-
-## Integrations (admin-only — listed for reference)
-
-| Method | Path | Notes |
-|---|---|---|
-| GET    | `/integrations` | List own + all when admin |
-| POST   | `/integrations` | Register, returns plaintext key |
-| GET    | `/integrations/{id}` | One row |
-| PATCH  | `/integrations/{id}` | Edit `base_url`/`scopes`/`version`/`enabled` |
-| DELETE | `/integrations/{id}` | Drop row |
-| POST   | `/integrations/{id}/rotate-key` | New key, old invalidated |
-
-Note that you cannot manage your **own** integration through these
-endpoints with your integration key — admin only. Have your
-operator do it through the web UI.
-
-## WebSockets
-
-| Path | Scope | Purpose |
-|---|---|---|
-| `/sessions/{id}/stream` | `session:read` | Live PTY stdout (binary frames) |
-| `/integrations/_events?topics=…` | `event:subscribe:<topic>` per topic | Live event bus |
-
-See [Event subscriptions](#consuming-websocket-events) for the WS
-event contract.
-
-## Reverse-proxy mode
-
-If your integration is registered with `base_url` + `route_prefix`,
-**any** path under `/api/v1/proxy/<route_prefix>/*` is forwarded
-to your service after auth + scope checks. Path stripping leaves
-the request path inside your service unprefixed.
-
-Example: integration `route_prefix=pet-tracker`,
-`base_url=http://192.168.3.42:8080`. Caller hits
-`/api/v1/proxy/pet-tracker/api/dogs?breed=corgi` → your service
-sees `GET /api/dogs?breed=corgi`.
-
-## Response envelopes
-
-opendray doesn't wrap successful responses in a generic envelope —
-the body **is** the resource (or `{<key>: [array]}` when listing).
-Errors always come back as:
-
-```json
-{ "error": "human-readable reason" }
+```http
+GET /api/v1/sessions?cursor=eyJp...
 ```
 
-paired with an HTTP status code. `4xx` = caller's fault, `5xx` = a
-gateway fault (or a downstream service in proxy mode).
+Response:
+
+```json
+{
+  "data": [ { "id": "..." } ],
+  "pagination": { "next_cursor": "eyJp...", "has_more": true }
+}
+```
+
+Cursors are opaque — don't construct, just pass back.
+
+## Spawn example
+
+```http
+POST /api/v1/sessions
+Authorization: Bearer od_live_xxx
+Content-Type: application/json
+
+{
+  "provider": "claude",
+  "cwd": "/home/dev/proj",
+  "name": "refactor",
+  "claude_account_id": "work"
+}
+```
+
+```json
+HTTP/1.1 201 Created
+{
+  "id": "s_42",
+  "provider": "claude",
+  "cwd": "/home/dev/proj",
+  "state": "running",
+  "claude_account_id": "work",
+  "created_at": "2026-05-17T10:24:00Z"
+}
+```
+
+## Rate limits
+
+Default per integration key — see [reference/rate-limits](../reference/rate-limits).
+Per-endpoint overrides:
+
+| Endpoint | Override |
+|---|---|
+| `POST /api/v1/sessions` | 2 req/s (each forks process) |
+| `POST /api/v1/integrations` | 0.1 req/s |
+| `POST /api/v1/channels/{id}/send` | 5 req/s (upstream platforms rate-limit too) |
+
+## Errors
+
+Common — see [error-handling](./error-handling) for the envelope shape.
+
+For the full spec including request / response schemas, fetch:
+
+```bash
+curl http://localhost:8770/api/v1/openapi.json
+```

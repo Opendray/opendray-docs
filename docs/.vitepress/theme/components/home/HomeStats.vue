@@ -23,15 +23,15 @@ const { lang } = useData()
 const isZh = computed(() => lang.value?.startsWith('zh'))
 
 const stats = computed(() => isZh.value ? [
-  { value: '6', suffix: '+', label: '内置消息平台' },
-  { value: '3', suffix: '+', label: '支持的 AI CLI' },
-  { value: '100', suffix: '%', label: '自托管,数据不出网' },
-  { value: '<60', suffix: 's', label: '从安装到第一个会话' },
+  { value: '8', label: '内置消息平台' },
+  { value: '4', label: 'CLI providers 开箱即用' },
+  { value: '15', suffix: '+', label: '后台页面' },
+  { value: '1', label: 'Go 二进制 · 不需要其他 runtime' },
 ] : [
-  { value: '6', suffix: '+', label: 'Bundled messengers' },
-  { value: '3', suffix: '+', label: 'AI CLIs supported' },
-  { value: '100', suffix: '%', label: 'Self-hosted, on-prem' },
-  { value: '<60', suffix: 's', label: 'Install to first session' },
+  { value: '8', label: 'Bundled messengers' },
+  { value: '4', label: 'CLI providers built in' },
+  { value: '15', suffix: '+', label: 'Admin pages' },
+  { value: '1', label: 'Go binary · zero runtime deps' },
 ])
 </script>
 

@@ -1,190 +1,90 @@
-# 主题清单
+---
+kind: capability
+title: Topic 目录
+tldr: 每个事件 topic + payload schema。session.* / channel.* / memory.* / notification.* / system.*。是 WS subscribe 过滤的权威。
+status: stable
+since: v0.1.0
+topic: activity
+related: [activity/overview, integrations/events-ws, consuming/websocket-events]
+capability: [event-bus, topic-hierarchy]
+inbound: internal-publishers
+outbound: ws-subscribers
+x-implementation: [internal/eventbus/topics.go]
+---
 
-opendray 发布的每个事件,以及它的完整 payload 形状。作为
-参考很有用,在以下情况:
+# Topic 目录
 
-- 写一个外部脚本,通过 [Events
-  WebSocket](#integrations-events-ws) 订阅。
-- 构建一个需要对 opendray 事件做反应的自定义插件。
-- 调试 "这个主题到底带了什么?"
+> **tldr:** 每个事件 topic + payload schema。`session.*` / `channel.*` / `memory.*` / `notification.*` / `system.*`。是 WS subscribe 过滤的权威。
 
-## session.*
+## Topic 前缀
 
-### `session.started`
+| 前缀 | 发布者 | 订阅者 |
+|---|---|---|
+| `session.*` | session manager | 集成事件 WS、channel hub |
+| `channel.*` | channel hub | 集成事件 WS、审计 |
+| `memory.*` | memory 子系统 | 集成事件 WS、项目记忆 scanner |
+| `notification.*` | UI 通知引擎 | 集成事件 WS、web 后台 |
+| `system.*` | gateway 生命周期 | 审计日志 |
 
-```json
-{
-  "session_id": "ses_abc123",
-  "provider_id": "claude",
-  "cwd": "/Users/me/projects/foo",
-  "started_at": "2026-05-04T10:00:00Z"
-}
-```
+## Session topic
 
-### `session.idle`
+| Topic | Payload |
+|---|---|
+| `session.s_42.started` | `{ session_id, provider, cwd, args }` |
+| `session.s_42.output` | `{ stream: 'stdout'\|'stderr', data: string }` |
+| `session.s_42.idle` | `{ session_id, idle_for_seconds }` |
+| `session.s_42.permission_ask` | `{ command, context_hint }` |
+| `session.s_42.ended` | `{ exit_code, reason }` |
+| `session.s_42.stopped` | `{ signaled_by, exit_code }` |
 
-```json
-{
-  "session_id": "ses_abc123",
-  "idle_for_ms": 30000,
-  "recent_output": "● Got it — let's design the API…"
-}
-```
+## Channel topic
 
-`recent_output` **仅在** 会话已经产生输出 AND snippet 流水线
-成功时存在。对全新 / 静默的会话为空。
+| Topic | Payload |
+|---|---|
+| `channel.ch_tg_main.connecting` | `{ channel_id, kind }` |
+| `channel.ch_tg_main.running` | `{ channel_id, kind }` |
+| `channel.ch_tg_main.failed` | `{ channel_id, error_code, error_message }` |
+| `channel.ch_tg_main.message_in` | `{ user_id, text, reply_to }` |
+| `channel.ch_tg_main.message_forwarded` | `{ session_id, text }` |
+| `channel.ch_tg_main.delivery` | `{ message_id, ok }` |
 
-### `session.ended`
+## Memory topic
 
-```json
-{
-  "session_id": "ses_abc123",
-  "exit_code": 0,
-  "ended_at": "2026-05-04T10:30:00Z",
-  "state": "ended"
-}
-```
+| Topic | Payload |
+|---|---|
+| `memory.write` | `{ id, scope, scope_key, source: 'tool'\|'mirror'\|'capture' }` |
+| `memory.recall` | `{ query, scope, top_k, hit_count, latency_ms }` |
+| `memory.conflict_detected` | `{ row_id, conflict_with_id, similarity }` |
+| `memory.cleanup.run_started` | `{ scheduler }` |
+| `memory.cleanup.row_removed` | `{ id, reason }` |
 
-`state` 在自然退出时为 `ended`,在 SIGTERM 驱动的关停时为
-`stopped`。
+## Notification topic
 
-### `session.stopped`
+| Topic | Payload |
+|---|---|
+| `notification.session_idle_pushed` | `{ session_id, channel_id, recipient }` |
+| `notification.permission_ask_pushed` | 同 |
+| `notification.session_done_pushed` | 同 |
 
-payload 跟 `session.ended` 一样,但只在操作员通过 × 按钮
-显式停止会话时发布。
+## System topic
 
-## channel.*
+| Topic | Payload |
+|---|---|
+| `system.startup` | `{ version, uptime_s: 0 }` |
+| `system.shutdown` | `{ reason, uptime_s }` |
+| `system.config_reloaded` | `{ section }` |
+| `system.embedder_changed` | `{ from, to }` |
 
-### `channel.message_received`
+## 订阅
 
-```json
-{
-  "channel_id": "ch_xyz",
-  "channel_message_id": 12345,
-  "conversation_id": "42",
-  "author": "@alice",
-  "text": "any plain text the user typed"
-}
-```
+Topic 模式支持通配:
 
-在到达的非命令消息 **没有** 被路由到会话时触发。(如今多数
-非命令文本路由到会话并改为发 `channel.message_forwarded`。)
+| 模式 | 订阅 |
+|---|---|
+| `session.s_42.output` | 一个精确 |
+| `session.*.output` | 所有 session 的 output |
+| `session.s_42.*` | 一个 session 的所有事件 |
+| `*` | 全部(仅 admin) |
 
-### `channel.message_forwarded`
-
-```json
-{
-  "channel_id": "ch_xyz",
-  "channel_message_id": 12345,
-  "session_id": "ses_abc",
-  "text": "the text that was written to the session's stdin"
-}
-```
-
-在 opendray 通过路由流水线成功把入站通道文本转发到会话时
-触发。
-
-### `channel.message_sent`
-
-```json
-{
-  "channel_id": "ch_xyz",
-  "topic": "session.idle"
-}
-```
-
-在 opendray 成功在通道上发出出站通知后触发。`topic` 字段
-携带 *源头* 事件主题(所以你可以把 idle → sent 关联起来)。
-
-### `channel.command_received`
-
-```json
-{
-  "channel_id": "ch_xyz",
-  "channel_message_id": 12346,
-  "command": "cancel",
-  "args": ["ses_abc"],
-  "source": "builtin"
-}
-```
-
-`source` 是 `builtin`(opendray 注册的)或 `custom`(应用
-注册的)。
-
-### `channel.command_unknown`
-
-形状跟 `command_received` 一样,只是少了 `source`。在用户
-输入了一个未识别的 slash 命令时触发 — opendray 回复
-"try /help"。
-
-## integration.*
-
-### `integration.call_logged`
-
-```json
-{
-  "principal_kind": "integration",
-  "principal_id": "int_abc",
-  "method": "POST",
-  "path": "/api/v1/proxy/anthropic/v1/messages",
-  "status": 200,
-  "duration_ms": 1234,
-  "request_id": "yinglincuisMini/abc123-000042"
-}
-```
-
-每一次已记录调用触发一次,**在** 响应完全写出 **之后**。
-
-### `integration.health_changed`
-
-```json
-{
-  "integration_id": "int_abc",
-  "previous": "healthy",
-  "current": "degraded",
-  "reason": "5 consecutive 5xx responses"
-}
-```
-
-在周期性健康检查翻转一个集成的状态时触发。(状态即使不翻转
-也会更新;事件只在状态转变时触发。)
-
-## audit.*
-
-### `audit.event`
-
-```json
-{
-  "actor_kind": "admin",
-  "actor_id": null,
-  "action": "channel.update",
-  "subject_kind": "channel",
-  "subject_id": "ch_xyz",
-  "metadata": { ... }
-}
-```
-
-镜像每一行写入 `audit_log` 表的记录。当你不想去轮询那张表
-时,用这个做 SIEM 摄入。
-
-## vaultgit.*
-
-### `vaultgit.sync_completed`
-
-```json
-{
-  "files_changed": 3,
-  "ahead": 5,
-  "behind": 0,
-  "duration_ms": 412
-}
-```
-
-每次自动 vault git 同步周期结束后触发。
-
-## 自定义主题
-
-任何插件 / 扩展都可以以自己的前缀发布。按约定,使用
-`<plugin-name>.<event>`,这样消费者可以无冲突地过滤。
-opendray 自己保留 `session.*`、`channel.*`、`integration.*`、
-`audit.*`、`vaultgit.*`。
+按 [integrations/events-ws](../integrations/events-ws),模式必须
+匹配 API key 上的 scope(`event:subscribe:<prefix>`)。

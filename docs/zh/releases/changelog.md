@@ -1,4 +1,17 @@
+---
+kind: concept
+title: 更新日志
+tldr: 每版本的显著变更。权威源 — GitHub releases。SemVer。Major = breaking,minor = additive,patch = fixes。
+status: stable
+since: v0.1.0
+topic: releases
+related: [releases/roadmap, releases/showcase]
+x-implementation: [github.com/opendray/opendray/releases]
+---
+
 # 更新日志
+
+> **tldr:** 每版本的显著变更。权威源 —— [GitHub releases](https://github.com/opendray/opendray/releases)。SemVer。Major = breaking,minor = additive,patch = fixes。
 
 opendray 所有显著变更都记录在这里。格式遵循
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),版本号

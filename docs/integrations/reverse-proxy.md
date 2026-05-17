@@ -1,84 +1,72 @@
+---
+kind: capability
+title: Reverse proxy
+tldr: Mount any HTTP backend behind opendray. /api/v1/proxy/<prefix>/* → <integration.base_url>/*. opendray injects X-Integration-ID, strips incoming Authorization, applies scope check.
+status: stable
+since: v0.1.0
+topic: integrations
+related: [integrations/overview, integrations/auth-model, integrations/call-log]
+capability: [reverse-proxy, header-injection, scope-enforcement]
+inbound: http
+outbound: http
+x-implementation: [internal/integration/proxy.go]
+---
+
 # Reverse proxy
 
-Mount any HTTP backend behind opendray's auth + audit pipeline.
-The reverse-proxy section of the Integrations page is what makes
-opendray a true "API gateway" rather than just a session manager.
+> **tldr:** Mount any HTTP backend behind opendray. `/api/v1/proxy/<prefix>/*` → `<integration.base_url>/*`. opendray injects `X-Integration-ID`, strips incoming `Authorization`, applies scope check.
 
-## When to use
+## Routing
 
-Two main cases:
-
-1. **Aggregating internal tools.** You want one Bearer-token
-   surface for Grafana, your custom dashboard, the webhooks
-   collector, etc. Mount each behind a path prefix on opendray.
-2. **Auditing AI provider calls.** Mount Anthropic's API behind
-   `/api/v1/proxy/anthropic`, hand out scoped integration keys
-   to internal tools, and every call shows up in the call log
-   with caller attribution.
-
-## Adding a proxy mount
-
-Integrations → **Reverse proxy** sub-tab → **Add mount**.
-
-| Field | Purpose |
+| Request | Forwards to |
 |---|---|
-| **Path prefix** | Where on opendray the mount lives (e.g. `/api/v1/proxy/anthropic`) |
-| **Upstream base URL** | Where to forward to (e.g. `https://api.anthropic.com`) |
-| **Integration ids** | Whitelist of integration keys allowed to hit this mount; empty = admin-only |
-| **Strip prefix** | When `true`, strip the path prefix before forwarding |
-| **Header passthrough** | Comma-separated list of incoming headers to forward |
-| **Header injection** | Map of headers to set on the outgoing request (e.g. inject `Authorization: ...` from a secret) |
+| `GET /api/v1/proxy/pettracker/v1/pets` | `https://pettracker.local/v1/pets` |
+| `POST /api/v1/proxy/pettracker/v1/pets/42/vaccinate` | `https://pettracker.local/v1/pets/42/vaccinate` |
 
-![Reverse proxy mount form](/tutorial/integrations-proxy-mount.png)
+`prefix` = integration's registered name (`pettracker`). `base_url`
+comes from the integration record.
 
-## Header injection example
+## Headers
 
-Mount Anthropic's API with the upstream API key injected from an
-opendray-managed secret:
+| Header | Direction | What |
+|---|---|---|
+| `X-Integration-ID` | injected | the integration's id (`int_wN79...`) |
+| `X-OpenDray-Forwarded-For` | injected | original client IP |
+| `X-OpenDray-API-Version` | injected | `v1` |
+| `Authorization` (incoming) | **stripped** | client's bearer token isn't forwarded |
 
-```
-Path prefix:        /api/v1/proxy/anthropic
-Upstream base URL:  https://api.anthropic.com
-Strip prefix:       true
-Header injection:   x-api-key=$ANTHROPIC_API_KEY
-```
+| Body size limit | direction |
+|---|---|
+| 10 MB | request |
+| 10 MB | response |
 
-Now any integration key hitting
-`https://opendray/api/v1/proxy/anthropic/v1/messages` gets the
-request forwarded to `https://api.anthropic.com/v1/messages`
-with the right `x-api-key` set. The internal tool never sees the
-upstream API key.
+## Health gating
 
-`$ANTHROPIC_API_KEY` interpolates from opendray's environment;
-operators rotate it once and every mount picks up the new value.
+| Probe result | Proxy behaviour |
+|---|---|
+| healthy | forwards normally |
+| 1st failure | still forwards |
+| 2 consecutive failures | marks unhealthy; subsequent calls → 503 `channel_not_connected` |
+| 1 success after unhealthy | back to healthy |
 
-## What the proxy does
+## Capabilities
 
-1. **Auth** — the request goes through the standard dual-auth
-   middleware. Admin token or whitelisted integration key.
-2. **Strip prefix** — if enabled, drops the mount prefix from
-   the forward URL.
-3. **Header rewrite** — passthrough + injection.
-4. **Forward** — `httputil.ReverseProxy` does the actual
-   request, streaming the body in both directions (so SSE
-   from Anthropic flows through unbuffered).
-5. **Call log** — middleware records the call with the calling
-   integration id + status code + duration.
+| feature | supported |
+|---|---|
+| HTTP/1.1 + HTTP/2 | ✓ |
+| WebSocket pass-through | ✗ (planned) |
+| Streaming response | ✓ |
+| Path / query forwarding | ✓ |
+| Multipart forms | ✓ (≤ 10 MB) |
+| Auto-retry on 5xx | ✗ |
+| TLS to backend | ✓ (if `base_url` is https://) |
 
-Streaming: opendray uses `Flush()` after every response chunk,
-so Server-Sent Events from upstream API providers (Anthropic's
-`/v1/messages?stream=true`, OpenAI's `/v1/chat/completions`) work
-without buffering latency.
+## Errors
 
-## Limitations
-
-- **No path rewrite beyond strip-prefix.** If you need
-  `/foo/bar` → `/baz/bar`, run a real reverse proxy (Caddy,
-  nginx) in front. opendray's proxy is intentionally simple.
-- **No retry on upstream 5xx.** A failure surfaces immediately
-  to the caller. Run idempotent jobs through external retries.
-- **No body inspection.** opendray doesn't parse JSON bodies;
-  request size limit is 10 MiB by default.
-- **WebSocket proxying** is not supported (the proxy is HTTP-
-  request-scoped). Use Events WS for opendray-native event
-  subscription.
+| code | http | cause | fix |
+|---|---|---|---|
+| `integration_not_found` | 404 | unknown prefix | check `/api/v1/integrations` list |
+| `integration_disabled` | 503 | `enabled: false` | toggle in Integrations page |
+| `channel_not_connected` | 503 | health probe says unhealthy | check your backend's `GET /` |
+| `proxy_body_too_large` | 413 | > 10 MB | chunk into smaller calls |
+| `proxy_backend_unreachable` | 502 | DNS / TCP fail to `base_url` | verify URL + network |

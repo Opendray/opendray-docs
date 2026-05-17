@@ -1,0 +1,122 @@
+{
+  "$schema": "https://docs.opendray.dev/mcp-manifest.schema.json",
+  "name": "opendray-docs",
+  "version": "1.0.0",
+  "description": "MCP resource manifest for opendray's documentation site. Lets AI agents (Claude, Codex via MCP, etc.) treat opendray-docs as a queryable knowledge base.",
+  "protocol_version": "2025-03-26",
+  "transport": {
+    "type": "http",
+    "endpoint": "https://docs.opendray.dev/mcp",
+    "note": "Endpoint not yet live in v1.0 — manifest stub for future server. Track issue #docs-mcp-server."
+  },
+  "resources": [
+    {
+      "uri": "opendray://docs/llms-index",
+      "name": "llms.txt index",
+      "description": "Markdown index of every doc page with one-line tldr.",
+      "mimeType": "text/plain",
+      "fetch": "GET https://docs.opendray.dev/llms.txt"
+    },
+    {
+      "uri": "opendray://docs/llms-full",
+      "name": "llms-full.txt",
+      "description": "Concatenated full text of every doc page.",
+      "mimeType": "text/plain",
+      "fetch": "GET https://docs.opendray.dev/llms-full.txt"
+    },
+    {
+      "uri": "opendray://docs/manifest",
+      "name": "manifest.json",
+      "description": "Top-level capability listing + differentiators + non-goals.",
+      "mimeType": "application/json",
+      "fetch": "GET https://docs.opendray.dev/manifest.json"
+    },
+    {
+      "uri": "opendray://docs/openapi",
+      "name": "openapi.yaml",
+      "description": "OpenAPI 3.1 spec for the REST API.",
+      "mimeType": "application/yaml",
+      "fetch": "GET https://docs.opendray.dev/openapi.yaml"
+    },
+    {
+      "uri": "opendray://docs/capability/channels",
+      "name": "channels capability",
+      "description": "Per-platform channel capability matrix.",
+      "mimeType": "application/json",
+      "fetch": "GET https://docs.opendray.dev/capabilities/channels.json"
+    },
+    {
+      "uri": "opendray://docs/capability/providers",
+      "name": "providers capability",
+      "description": "Per-CLI provider manifest schema.",
+      "mimeType": "application/json",
+      "fetch": "GET https://docs.opendray.dev/capabilities/providers.json"
+    },
+    {
+      "uri": "opendray://docs/capability/memory",
+      "name": "memory capability",
+      "description": "Memory scopes, embedders, capture/summarize/cleanup workers.",
+      "mimeType": "application/json",
+      "fetch": "GET https://docs.opendray.dev/capabilities/memory.json"
+    },
+    {
+      "uri": "opendray://docs/capability/sessions",
+      "name": "sessions capability",
+      "description": "Session state machine, PTY parameters, multi-client rules.",
+      "mimeType": "application/json",
+      "fetch": "GET https://docs.opendray.dev/capabilities/sessions.json"
+    },
+    {
+      "uri": "opendray://docs/capability/integrations",
+      "name": "integrations capability",
+      "description": "Reverse proxy, event WS, scopes, health probes, key rotation.",
+      "mimeType": "application/json",
+      "fetch": "GET https://docs.opendray.dev/capabilities/integrations.json"
+    }
+  ],
+  "tools": [
+    {
+      "name": "opendray_doc_search",
+      "description": "Free-text search across opendray docs. Returns top-N matching page URLs with snippet.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query":  { "type": "string" },
+          "lang":   { "type": "string", "enum": ["en", "zh"], "default": "en" },
+          "limit":  { "type": "integer", "default": 5, "maximum": 20 }
+        },
+        "required": ["query"]
+      },
+      "status": "stub"
+    },
+    {
+      "name": "opendray_capability_query",
+      "description": "Look up whether a specific kind (channel, provider) supports a specific capability.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "subsystem":  { "type": "string", "enum": ["channels", "providers", "memory"] },
+          "kind":       { "type": "string", "description": "e.g. telegram, claude, bm25" },
+          "capability": { "type": "string", "description": "e.g. reply-routing, mcp-supported" }
+        },
+        "required": ["subsystem", "kind", "capability"]
+      },
+      "status": "stub"
+    }
+  ],
+  "prompts": [
+    {
+      "name": "explain_capability",
+      "description": "Returns the canonical capability matrix for a subsystem.",
+      "arguments": [
+        { "name": "subsystem", "required": true }
+      ]
+    }
+  ],
+  "ai_consumption_recipe": [
+    "1. Fetch opendray://docs/llms-index to discover what pages exist.",
+    "2. For functional questions, fetch the relevant opendray://docs/capability/* — they are unambiguous and small.",
+    "3. For API calls, fetch opendray://docs/openapi to get exact paths + schemas.",
+    "4. Only fetch llms-full when narrative context is required (humans-only explanations are in <details> blocks)."
+  ]
+}

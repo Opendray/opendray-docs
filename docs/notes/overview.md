@@ -1,38 +1,52 @@
+---
+kind: concept
+title: Notes — overview
+tldr: Obsidian-compatible markdown vault on opendray's disk. Per-session linked notes auto-created. Wiki links + backlinks. Optional git sync. Same vault Claude can read back as context.
+status: stable
+since: v0.1.0
+topic: notes
+related:
+  - notes/editor
+  - notes/wiki-links
+  - notes/vault-git-sync
+  - sessions/inspector
+references:
+  capabilities: [sessions]
+x-implementation:
+  - internal/notes/
+---
+
 # Notes — overview
 
-The Notes page is a markdown editor + viewer over an Obsidian-
-style vault. It serves two roles:
+> **tldr:** Obsidian-compatible markdown vault on opendray's disk. Per-session linked notes auto-created. Wiki links + backlinks. Optional git sync. Same vault Claude can read back as context.
 
-1. **Per-session linked notes.** Every session in the Sessions
-   page has a note at `<vault>/sessions/<session-id>.md`
-   embedded in the Inspector. Use it as the running scratchpad
-   for that session's work.
-2. **Standalone vault.** Project docs, decisions, references —
-   anything you'd put in Obsidian. opendray works against the
-   same vault Obsidian does, so you can edit from either side.
+## What it is
 
-![Notes page](/tutorial/notes-layout.png)
-
-## Vault root
-
-Configured via `notes.root` in `config.toml`:
-
-```toml
-[notes]
-root = "~/.opendray/vault"
-```
-
-opendray treats every `.md` file under that root as a note. The
-default vault directory contains:
-
-- `sessions/` — auto-managed per-session notes (don't rename
-  files here; the linkage is by file path)
-- `<your folders>/` — standalone notes, anything you create
-
-## Read on
-
-| Topic | Section |
+| Concept | Behaviour |
 |---|---|
-| `[[Wiki Links]]` and how the backlinks pane works | Wiki links + backlinks |
-| Auto-commit + push to a remote git host | Vault git sync |
-| Source vs Preview mode + auto-save behaviour | Editor |
+| Vault | one directory tree of `.md` files on opendray host disk |
+| Per-session note | auto-created at `<vault>/sessions/<sid>.md` |
+| Wiki links | `[[other-note]]` resolves to file by name |
+| Backlinks | computed; shown in right pane |
+| File watcher | external edits picked up live |
+| Git sync | optional — `<vault>` is a git repo |
+
+## Why a vault rather than a DB
+
+| Vault (markdown) | DB-stored notes |
+|---|---|
+| editable in Obsidian / VS Code / any editor | locked to opendray UI |
+| diff-able, version-controllable | requires migration scripts |
+| Claude / Codex can read via `opendray notes` CLI | needs API call |
+| backups = `git push` | needs structured export |
+
+## When to read what
+
+| Topic | Read |
+|---|---|
+| Editor specifics + Source/Preview | [editor](./editor) |
+| `[[wiki-links]]` + autocomplete + backlinks | [wiki-links](./wiki-links) |
+| Git sync setup + conflict handling | [vault-git-sync](./vault-git-sync) |
+| Inspector's Notes tab (per-session) | [sessions/inspector](../sessions/inspector) |
+
+![Notes layout](/tutorial/notes-layout.png)

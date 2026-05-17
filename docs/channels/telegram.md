@@ -1,123 +1,156 @@
+---
+kind: capability
+title: Telegram
+tldr: Get a bot token from @BotFather, paste it under Channels → New → kind=telegram. Long-poll, no public URL needed.
+status: stable
+since: v0.1.0
+topic: channels
+related:
+  - channels/overview
+  - channels/notifications
+  - channels/routing
+capability:
+  - text
+  - html-parse-mode
+  - inline-buttons
+  - reply-routing
+  - edit-in-place
+  - typing-indicator
+inbound: long-poll
+outbound: rest
+public-url-required: false
+setup-time-minutes: 3
+x-implementation:
+  - internal/channel/telegram/
+  - internal/channel/hub.go
+x-api-version: telegram-bot-api-7
+---
+
 # Telegram
 
-**Mode:** long-poll (no public URL)
-**Capabilities:** text · card · buttons · update_message · typing · reply_to_message
-**Setup time:** ~3 minutes
+> **tldr:** Get a bot token from @BotFather, paste it under **Channels → New → kind=telegram**. Long-poll, no public URL needed.
 
-This is the fastest channel to set up because Telegram lets bots
-long-poll their own API — no webhook, no public host required.
+## Setup
 
-## 1. Create a bot via BotFather
+| # | Action | Where |
+|---|---|---|
+| 1 | `/newbot` to [@BotFather](https://t.me/BotFather), save the token `<digits>:<base64>` | Telegram |
+| 2 | (optional) Add the bot to your target chat, then `/myid` to [@userinfobot](https://t.me/userinfobot) to get the `chat_id` | Telegram |
+| 3 | Open opendray **Channels** → **+ New** → kind = `telegram` → paste the token | opendray admin |
+| 4 | (optional) Paste the `default_chat_id` so unaddressed sends pick a default destination | opendray admin |
+| 5 | Click **Save** — status pill goes from `connecting` → `running` within ~2 s | opendray admin |
 
-1. In Telegram, search for [@BotFather](https://t.me/BotFather) and
-   start a chat.
-2. Send `/newbot`. BotFather walks you through:
-   - **Name** — display name shown in the chat (e.g. `OpenDray`).
-   - **Username** — must end with `bot` (e.g. `mycompany_opendray_bot`).
-3. BotFather replies with a token like
-   `123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11`. **Copy it** —
-   you'll paste it into opendray.
+## Config schema
 
-![BotFather token reveal](/tutorial/telegram-botfather-token.png)
-
-## 2. Find your chat ID
-
-You need to know which chat (private DM or group) opendray should
-default to.
-
-**Easy path:**
-
-1. Add the bot to a group, OR open a private chat with it.
-2. Send any message in that chat (e.g. `hi`).
-3. Open `https://api.telegram.org/bot<TOKEN>/getUpdates` in a
-   browser, replacing `<TOKEN>` with your bot token.
-4. Find `"chat":{"id":...}` in the JSON. Positive number = DM,
-   negative number = group, larger negative starting with `-100`
-   = supergroup.
-
-```
-https://api.telegram.org/bot123456:ABC-DEF.../getUpdates
-
-{"ok":true,"result":[{
-  "update_id":...,
-  "message":{
-    "chat":{"id":7831238986,"type":"private"},
-    ...
-  }
-}]}
+```yaml
+# Channels → New → kind=telegram
+kind: telegram                          # literal, required
+token: "<digits>:<base64-url>"          # secret, required; regex /^\d+:[A-Za-z0-9_-]+$/
+default_chat_id: integer                # optional; routes unaddressed sends here
+notify:
+  started:            false             # default false
+  idle:               true              # default true
+  ended:              true              # default true
+  permission_ask:     true              # default true
+repeat_policy: once-per-session         # enum: never | once-per-session | always
+snippet:
+  enabled:            false             # default false
+  max_lines:          10                # default 10, range [1, 200]
+enabled: true                           # toggle without deleting
 ```
 
-That `7831238986` is your chat id.
+## Capabilities
 
-## 3. (Optional) Restrict the bot to groups only
+| feature | supported | implementation note |
+|---|---|---|
+| inbound (long-poll) | ✓ | `getUpdates` loop in `internal/channel/telegram/poller.go` |
+| outbound HTML | ✓ | `parse_mode=HTML` — supports `<b>`, `<i>`, `<code>`, `<pre>`, `<a href>` |
+| inline buttons | ✓ | `reply_markup.inline_keyboard`; callbacks routed via hub |
+| reply-to-message routing | ✓ | reply targets original session's stdin |
+| edit-in-place | ✓ | used for `idle → running` and `running → done` updates |
+| typing indicator | ✓ | `sendChatAction` while session is producing output |
+| file upload | ✗ | not implemented (issue #channels-file-upload) |
+| voice / video | ✗ | out of scope |
 
-By default the bot can be added to any group. To lock it to your
-group only:
+## Errors
 
-- BotFather → `/setjoingroups` → pick your bot → **Disable**.
+| code | http | cause | fix |
+|---|---|---|---|
+| `channel_kind_unsupported` | 400 | `kind` field is not literal `telegram` | use exact string `telegram` |
+| `tg_invalid_token` | 400 | malformed token (wrong shape) | re-check regex `^\d+:[A-Za-z0-9_-]+$` |
+| `tg_unauthorized` | 401 | token revoked or wrong | regenerate via `/revoke` then `/token` in @BotFather |
+| `tg_chat_not_found` | 404 | wrong `chat_id` or bot kicked from chat | re-invite bot to chat, re-fetch chat_id |
+| `tg_rate_limited` | 429 | > 30 msg/s to one chat | set `repeat_policy: once-per-session`; back off per `Retry-After` |
+| `tg_message_too_long` | 400 | > 4096 chars after HTML escaping | reduce `snippet.max_lines` or split message |
 
-## 4. Configure in opendray
+## Examples
 
-Channels → **New channel** → kind **Telegram**.
+### Send via REST
 
-| Field | Value |
-|---|---|
-| **Bot token** | the BotFather token from step 1 |
-| **Default chat ID** | the chat id from step 2 (optional — used for outbound when no `ReplyCtx` is present) |
-| Repeat policy | leave at "Once per session" |
-| Terminal snippet | leave on, "No cap" |
+```http
+POST /api/v1/channels/ch_tg_main/send
+Authorization: Bearer od_live_xxxxxxxxxx
+Content-Type: application/json
 
-Save with **Enabled = on**.
-
-![New Telegram channel form](/tutorial/telegram-new-channel.png)
-
-## 5. Verify
-
-The card flips to `RUNNING` after a few seconds. Hit **Test**
-on the card — you should see *"OpenDray channel test ✓"* in the
-chat.
-
-Send `/help` to the bot in chat — opendray replies with the list of
-registered commands. That confirms inbound polling works.
-
-## 6. (Optional) Add slash-command autocomplete
-
-Telegram clients show a hint dropdown for known commands. Tell
-BotFather what they are:
-
-- `/setcommands` → pick the bot → paste:
-
-```
-help - List available commands
-status - Show channel status and capabilities
-notify - Toggle notifications: /notify on|off
-sessions - List recently-notified sessions
-select - Pin a session for replies
-cancel - End a session
-resume - Reply to resume a session
+{
+  "text": "Build #42 passed",
+  "session_ref": "s_42"
+}
 ```
 
-This is purely cosmetic — opendray accepts the commands either way.
+Response:
+
+```json
+HTTP/1.1 202 Accepted
+{ "message_id": "tg_847", "queued_at": "2026-05-17T10:24:00Z" }
+```
+
+### Inbound reply → stdin
+
+User replies to a notification card in Telegram. The hub:
+
+1. Receives `update.message.reply_to_message.message_id` via `getUpdates`.
+2. Looks up which session sent the original card.
+3. Writes the reply text into that session's stdin.
+
+No extra config — works out of the box.
 
 ## Limitations
 
-- Bot tokens are bearer credentials. Anyone with the token can
-  speak as your bot. If exposed: BotFather → `/revoke` → choose the
-  bot → confirm.
-- Inline-button `callback_data` is capped at 64 bytes by Telegram.
-  opendray's command payloads (`cmd:/cancel <session-id>`) fit.
-- Voice messages, stickers, locations — opendray doesn't decode
-  these. Only text + button clicks become inbound to a session.
+| limit | value | note |
+|---|---|---|
+| message body | 4096 chars | Telegram-enforced; HTML escaping counts |
+| inline button count | 100 / message | Telegram limit |
+| callback data | 64 bytes | Telegram limit; opendray uses opaque IDs |
+| send rate / chat | 30 / sec | Telegram limit; `repeat_policy` enforces |
+| send rate / bot | 30 / sec | aggregate across all chats |
 
-## Troubleshooting
+<details>
+<summary>📖 Narrative explanation</summary>
 
-**"telegram: getUpdates failed; backing off"** in the server log:
-- Token wrong (paste again, no leading/trailing spaces)
-- Or two opendray instances running with the same token —
-  Telegram's getUpdates is single-consumer and rejects with 409.
-  Stop the duplicate.
+Telegram is the easiest channel to wire up because it doesn't need a
+public URL — opendray long-polls Telegram for updates, so it works
+fine on a home server behind NAT. Getting started is just:
 
-**Bot doesn't see messages in a group**:
-- BotFather → `/setprivacy` → pick the bot → **Disable** (default
-  is "Enable" which means the bot only sees commands and
-  @mentions).
+1. Talk to [@BotFather](https://t.me/BotFather) in Telegram, type
+   `/newbot`, give the bot a display name and a `_bot`-suffixed
+   username.
+2. BotFather replies with a token like `1234567890:ABCdef...`. Save
+   it; you'll only see it once unless you ask BotFather for it again
+   later.
+3. In opendray, **Channels** → **+ New** → choose `telegram` from
+   the kind dropdown → paste the token.
+
+Most setups also want a *default chat ID*: that's the chat opendray
+will fire notifications into when a session's notification doesn't
+specify a target chat. To get it, add your bot to the chat you want
+to use, then `/myid` to [@userinfobot](https://t.me/userinfobot) — it
+replies with your chat's numeric ID.
+
+Once you click **Save**, the channel transitions through
+`connecting` → `running` in a couple of seconds. If it sticks on
+`connecting`, hit **Edit** → check the token format. If it errors
+to `failed`, see the **Errors** table above for the code-to-fix
+mapping.
+
+</details>

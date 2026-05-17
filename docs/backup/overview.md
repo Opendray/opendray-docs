@@ -1,57 +1,59 @@
+---
+kind: concept
+title: Backup — overview
+tldr: Two safety nets — encrypted pg_dump (full DB, restore-in-place) + zip-bundle export (data-only, portable across hosts). Both AES-GCM encrypted. Opt-in via OPENDRAY_BACKUP_ENABLED.
+status: stable
+since: v0.1.0
+topic: backup
+related: [backup/quickstart, backup/targets, backup/schedules, backup/export, backup/restore-and-import]
+references:
+  capabilities: []
+x-implementation: [internal/backup/, ADR 0012]
+---
+
 # Backup — overview
 
-opendray ships with two complementary safety nets for the data
-your gateway accumulates:
+> **tldr:** Two safety nets — encrypted `pg_dump` (full DB, restore-in-place) + zip-bundle export (data-only, portable across hosts). Both AES-GCM encrypted. Opt-in via `OPENDRAY_BACKUP_ENABLED`.
 
-- **A — Disaster-recovery backups** (`/backups`). Encrypted full
-  PostgreSQL dumps written to a pluggable storage target. Manual
-  trigger or recurring schedule. Aimed at "the box died, restore
-  on a new one."
-- **C — Data exports** (`/export`). One-shot zip bundles of
-  selected logical entities (memories, integrations metadata,
-  custom tasks). Aimed at "I want to take my data with me."
+## Two paths
 
-Both ride a shared cipher (AES-256-GCM, key derived from the
-`OPENDRAY_BACKUP_KEY` env var via PBKDF2). Without that env var
-set the entire feature stays off — see Quickstart below.
+| Path | What | Restore mode | Portability |
+|---|---|---|---|
+| Plan A — backup | encrypted `pg_dump` of entire DB | restore-in-place (same opendray) | tied to that host's schema version |
+| Plan C — export | zip bundle of decoded data | import into another opendray | cross-host migration |
 
-## Why two surfaces
+## Enable
 
-| Question | A | C |
+```bash
+# Master passphrase — env only, never in config.toml
+export OPENDRAY_BACKUP_KEY="$(openssl rand -base64 32)"
+export OPENDRAY_BACKUP_ENABLED=1
+
+# Match pg_dump major version to your Postgres server
+export OPENDRAY_BACKUP_PG_DUMP_PATH=/opt/homebrew/opt/postgresql@17/bin/pg_dump
+export OPENDRAY_BACKUP_PG_RESTORE_PATH=/opt/homebrew/opt/postgresql@17/bin/pg_restore
+```
+
+Restart opendray — Backups page (`/backups`) + Export page (`/export`) appear.
+
+## What's covered
+
+| Surface | Plan A backup | Plan C export |
 |---|---|---|
-| What's inside? | Whole PG dump + config.toml + manifest | A few JSONL tables + manifest, no dump |
-| Encrypted? | Whole bundle (tar.gz inside AES-GCM stream) | Zip is plaintext; sensitive fields wrapped per-row |
-| Triggered by? | Manual / scheduler | Manual |
-| Best for? | Restore an entire opendray instance | Migration, audit, "give me my data" |
-| Restore tool? | `pg_restore` after decrypting | Future import flow (v1.1) |
+| Sessions DB rows | ✓ | ✓ |
+| Memory (pgvector) | ✓ | ✓ |
+| Channels config | ✓ (encrypted secrets) | ✓ |
+| Integrations | ✓ | ✓ (keys regenerated) |
+| Audit + call log | ✓ | optional |
+| Notes vault | ✗ (use git for that) | ✗ |
+| Backup files themselves | n/a | n/a |
 
-## Where backups can go
+## Read next
 
-Six target kinds covering ≈99% of user storage habits:
-
-- **`local`** — directory on the opendray host (default fallback)
-- **`smb`** — Windows shares, home NAS (Synology / QNAP / UNAS)
-- **`s3`** — AWS S3, Cloudflare R2, B2, MinIO, Alibaba Cloud OSS (阿里云 OSS), Tencent Cloud COS (腾讯云 COS), …
-- **`webdav`** — Nextcloud, ownCloud, Synology DSM (群晖 DSM), Box, Jianguoyun (坚果云), …
-- **`sftp`** — any SSH-accessible server (VPS, Hetzner Storage Box)
-- **`rclone`** — passthrough to 70+ extra backends (Google Drive,
-  OneDrive, Dropbox, Baidu Pan (百度网盘), Aliyun Drive (阿里云盘), …)
-
-See **Targets** for the per-kind field list. All sensitive fields
-(passwords, secret keys, private keys) are AES-256-GCM encrypted
-at rest using the master backup passphrase.
-
-## What's NOT here (v1 scope cuts)
-
-- **No reverse import for restore** — restore replays a `pg_dump`
-  via `pg_restore`. The `/export` zip has its own import flow
-  (`/export → Import section`).
-- **No PITR / WAL archiving** — a pg_dump is a point-in-time
-  snapshot, not a continuous log. For sub-hour RPO use
-  PostgreSQL's own WAL archiving on top of opendray.
-- **No automatic key rotation** — lose the passphrase, lose the
-  ability to decrypt prior backups. Record the key fingerprint
-  shown on the Backups page in your secrets manager (Vaultwarden,
-  1Password, etc.).
-- **No edit-target UI** — to change a target's config (e.g. rotate
-  S3 credentials), delete + recreate. v1.1.
+| Topic | Read |
+|---|---|
+| Set it up in 5 min | [quickstart](./quickstart) |
+| Cloud targets (S3 / R2 / B2 / SMB) | [targets](./targets) |
+| Cron / retention | [schedules](./schedules) |
+| Plan C export format | [export](./export) |
+| Restore from A or import C | [restore-and-import](./restore-and-import) |

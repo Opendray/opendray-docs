@@ -1,113 +1,91 @@
+---
+kind: capability
+title: Ambient Memory — injection profiles
+tldr: Profile = what gets injected into a session's initial context. 3 modes — dense (top-K via search), sparse (recent only), off. Picked per (provider, cwd) match.
+status: stable
+since: v0.1.0
+topic: ambient-memory
+related:
+  - ambient-memory/overview
+  - ambient-memory/capture-rules
+  - memory/scopes
+capability:
+  - dense-injection
+  - sparse-injection
+  - off-mode
+inbound: session-spawn
+outbound: system-prompt-prefix
+x-implementation:
+  - internal/memory/injector/
+---
+
 # Ambient Memory — injection profiles
 
-An **injection profile** controls what — if anything — gets
-prepended to the agent's system prompt at spawn time. Without a
-profile, the model still has access to memories via the
-`memory_search` MCP tool; injection just makes recent context
-visible without the model having to think to look.
+> **tldr:** Profile = what gets injected into a session's initial context. 3 modes — `dense` (top-K via search), `sparse` (recent only), `off`. Picked per (provider, cwd) match.
 
-## Strategies
+## Modes
 
-### `none` (default if no profile exists)
+| Mode | What gets injected | When to use |
+|---|---|---|
+| `dense` (default) | top-K hits from `memory_search("project context")` | rich context, agent gets relevant facts up front |
+| `sparse` | last N most-recent memories (no search) | cheap, no embedding call on spawn |
+| `off` | nothing | clean-slate sessions; pure tool-use |
 
-Don't inject anything. Model uses `memory_search` /
-`memory_load_context` on demand if it wants context.
+## Config
 
-Use this when:
-- You don't want any memory in the context window
-- You trust the model to look things up itself
-- You're testing — confirm capture works without injection
-  affecting outputs
+```yaml
+- id: "default-dense"
+  match:
+    provider: [claude]
+    cwd_glob: "**"
+  profile:
+    mode: dense
+    top_k: 5
+    scope: [project, global]
+    template: |
+      # Project context (auto-loaded from memory)
+      {{- range .hits }}
+      - {{ .text }} (confidence {{ .score }})
+      {{- end }}
 
-### `top_k_recent`
+- id: "codex-sparse"
+  match:
+    provider: [codex]
+  profile:
+    mode: sparse
+    recent: 10
 
-Inject the K most recently created project-scoped memories at
-spawn. Format:
-
-```
-## Recent project memory
-opendray injected the following durable facts from prior
-sessions in this project:
-- User prefers pnpm over npm for package management
-- DB at db.example.com:5432, dev_user role
-- ...
-End of memory preface.
-```
-
-Default K = 5, max 50.
-
-This is the "give the agent freshest context" mode — appropriate
-for fast-moving projects where last week's context is stale.
-
-### `top_k_relevant`
-
-Like `top_k_recent` but ranked by semantic similarity instead of
-recency. Uses the cwd's basename as the search query, so it
-roughly translates to "memories most relevant to *this* project."
-
-Default K = 5.
-
-This is the "give the agent the most useful context" mode —
-appropriate for projects with deep memory histories where you
-want the agent to surface knowledge regardless of when it was
-captured.
-
-### `manual_only`
-
-Don't auto-inject at spawn. Operator triggers injection via UI
-button or API (Phase v1.1).
-
-Use when:
-- The session toolbar's "Load context" button (Phase v1.1) is
-  preferred over auto
-- You want human-in-the-loop curation
-
-### `hybrid`
-
-Inject a single ultra-short summary line (top-1 most recent
-project memory, ≤80 chars). Output looks like:
-
-```
-Project memory hint: User prefers pnpm over npm for package management
+- id: "shell-off"
+  match:
+    provider: [shell]
+  profile:
+    mode: off
 ```
 
-For tight context budgets where the multi-line banner is too
-expensive but you still want some bridge-of-context.
+## What gets injected where
 
-### `on_keyword` (Phase v1.1)
+| Provider | Injection point |
+|---|---|
+| `claude` | system prompt prefix (via MCP) |
+| `codex` | system prompt prefix (via MCP if supportsMcp; else skipped) |
+| `gemini` | system prompt prefix |
+| `shell` | nothing (no AI) |
 
-Reserved. UI lets you save the profile but the actual hook into
-the message stream is deferred to v1.1. Spawn-time injection is
-disabled when this strategy is selected (functionally equivalent
-to `none` until v1.1 ships).
+## Capabilities
 
-## Per-session vs global
+| feature | supported |
+|---|---|
+| Per-(provider, cwd) profile | ✓ |
+| Template via Go text/template | ✓ |
+| Cross-scope query (e.g. `[project, global]`) | ✓ |
+| Profile match order | first matching rule wins |
+| Disable per-spawn | ✓ (`X-OpenDray-Inject: off` header) |
+| Live preview in Settings | ✓ |
 
-Like capture rules, profiles can be session-scoped or global. v1
-UI manages the global default; per-session overrides are
-DB-direct only for now.
+## Errors
 
-## How injection actually wires
-
-At spawn time the catalog adapter calls `Injector.Render()` and
-prepends the result to the agent's system prompt:
-
-- **Claude:** appended via `--append-system-prompt` arg
-- **Codex:** written to `<CODEX_HOME>/AGENTS.md`
-- **Gemini:** written to `<baseDir>/GEMINI.md`
-
-Empty render → silent skip (no banner). Non-empty render → the
-banner appears at the top of the agent's system prompt before
-any other guidance.
-
-## How it interacts with capture
-
-Independent — capture writes memories, injection reads them.
-A common deployment is:
-- Capture rule: `after_messages` n=6, target=project
-- Injection profile: `top_k_recent` k=5, global
-
-Result: every 6 messages, durable facts from this conversation
-flow into the project memory pool. When you start a new session
-in the same project, the 5 most recent facts appear at the top
-of the agent's system prompt — instant continuity.
+| code | http | cause | fix |
+|---|---|---|---|
+| `injection_template_invalid` | 400 | Go template syntax error | test in Settings → Preview |
+| `injection_too_large` | 413 | rendered > 32 KB | reduce `top_k` or template length |
+| `injection_skipped_off` | (log info) | rule matched `off` | by design |

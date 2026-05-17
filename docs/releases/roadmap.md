@@ -1,4 +1,18 @@
+---
+kind: concept
+title: Roadmap
+tldr: High-level "why" behind upcoming work. Now / Soon / Later columns. GitHub project board is the granular tracker.
+status: stable
+since: v0.1.0
+topic: releases
+related: [releases/changelog, releases/showcase]
+x-implementation:
+  - github.com/orgs/opendray/projects
+---
+
 # Roadmap
+
+> **tldr:** High-level "why" behind upcoming work. Now / Soon / Later columns. [GitHub project board](https://github.com/orgs/opendray/projects) is the granular tracker.
 
 Where opendray is headed in the next few quarters. This page is a
 living document — items move between columns as priorities shift.

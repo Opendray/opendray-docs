@@ -1,37 +1,38 @@
-# 笔记 — 概览
+---
+kind: concept
+title: 笔记 Notes — 概览
+tldr: opendray 主机上的 Obsidian 兼容 markdown vault。每会话 linked 笔记自动创建。Wiki link + backlink。可选 git 同步。Claude 可读回作上下文。
+status: stable
+since: v0.1.0
+topic: notes
+related: [notes/editor, notes/wiki-links, notes/vault-git-sync, sessions/inspector]
+references:
+  capabilities: [sessions]
+x-implementation: [internal/notes/]
+---
 
-Notes 页是一个 Obsidian 风格 vault 之上的 markdown 编辑器 +
-查看器。它承担两个角色:
+# 笔记 Notes — 概览
 
-1. **Per-session 关联笔记。** Sessions 页里的每个会话都在
-   `<vault>/sessions/<session-id>.md` 下有一个笔记,嵌入在
-   Inspector 里。把它当作那个会话工作过程的滚动便签本。
-2. **独立 vault。** 项目文档、决策、参考资料 — 任何你会放
-   在 Obsidian 里的东西。opendray 对着同一个 Obsidian 用的
-   vault 工作,所以你两边都能编辑。
+> **tldr:** opendray 主机上的 Obsidian 兼容 markdown vault。每会话 linked 笔记自动创建。Wiki link + backlink。可选 git 同步。Claude 可读回作上下文。
 
-![笔记页面](/tutorial/notes-layout.png)
+## 是什么
 
-## Vault 根目录
-
-通过 `config.toml` 里的 `notes.root` 配置:
-
-```toml
-[notes]
-root = "~/.opendray/vault"
-```
-
-opendray 把那个根目录下每个 `.md` 文件当成一个笔记。默认
-vault 目录包含:
-
-- `sessions/` — 自动管理的 per-session 笔记(别在这里重命名
-  文件;关联是按文件路径)
-- `<your folders>/` — 独立笔记,你创建的任何东西
-
-## 继续阅读
-
-| 主题 | 章节 |
+| 概念 | 行为 |
 |---|---|
-| `[[Wiki 链接]]` 和反向链接(backlink)面板怎么工作 | Wiki 链接 + 反向链接 |
-| 自动 commit + 推送到远程 git 主机 | Vault git 同步 |
-| 源码 vs 预览模式 + 自动保存行为 | 编辑器 |
+| Vault | opendray 主机磁盘上的一个 `.md` 文件目录树 |
+| Per-session 笔记 | `<vault>/sessions/<sid>.md` 自动创建 |
+| Wiki link | `[[other-note]]` 按名解析到文件 |
+| Backlinks | 计算得出;右栏显示 |
+| 文件 watcher | 外部编辑实时拾起 |
+| Git 同步 | 可选 —— `<vault>` 是 git repo |
+
+## 何时读什么
+
+| 主题 | 读 |
+|---|---|
+| 编辑器细节 + Source/Preview | [editor](./editor) |
+| `[[wiki-links]]` + 自动补全 + backlink | [wiki-links](./wiki-links) |
+| Git 同步设置 + 冲突处理 | [vault-git-sync](./vault-git-sync) |
+| Inspector 的 Notes tab(per-session) | [sessions/inspector](../sessions/inspector) |
+
+![Notes 布局](/tutorial/notes-layout.png)

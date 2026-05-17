@@ -1,0 +1,385 @@
+openapi: 3.1.0
+info:
+  title: opendray
+  version: 1.0.0
+  summary: Self-hosted control gateway for AI coding CLIs.
+  description: |
+    REST + WebSocket API of an opendray v1.0 instance. Multiplexes
+    local Claude Code / Codex / Gemini / shell sessions, bridges to 8
+    messaging platforms, exposes a memory store, and lets external
+    apps reverse-proxy through it with scoped API keys.
+
+    Authoritative source: `internal/gateway/` in
+    [opendray/opendray-v2](https://github.com/Opendray/opendray_v2).
+    This spec is hand-curated to track v1.0.x and will be generated
+    from Go source in a future release.
+  contact:
+    name: Linivek
+    url: https://github.com/Opendray/opendray_v2
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: http://localhost:8770
+    description: Local development (default)
+  - url: https://{host}/api/v1
+    description: Self-hosted instance
+    variables:
+      host:
+        default: opendray.local
+
+security:
+  - integrationKey: []
+  - adminBearer: []
+
+tags:
+  - name: sessions
+    description: CLI session lifecycle (spawn / attach / kill).
+  - name: channels
+    description: Messaging-platform configuration + send.
+  - name: providers
+    description: CLI provider manifests.
+  - name: memory
+    description: Cross-CLI memory store.
+  - name: integrations
+    description: External-app registry + reverse proxy.
+  - name: activity
+    description: Audit log of every API call.
+
+paths:
+  /api/v1/sessions:
+    get:
+      operationId: listSessions
+      tags: [sessions]
+      summary: List sessions visible to the caller.
+      parameters:
+        - in: query
+          name: state
+          schema: { $ref: '#/components/schemas/SessionState' }
+        - in: query
+          name: cursor
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated list of sessions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionList'
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+      x-required-scope: session:read
+      x-rate-limit: { sustained: '10 req/s', burst: 30 }
+    post:
+      operationId: spawnSession
+      tags: [sessions]
+      summary: Spawn a new CLI session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SpawnRequest' }
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '400': { $ref: '#/components/responses/Error' }
+        '503':
+          description: provider_unavailable — CLI binary not startable
+      x-required-scope: session:write
+      x-rate-limit: { sustained: '2 req/s', burst: 6 }
+  /api/v1/sessions/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getSession
+      tags: [sessions]
+      responses:
+        '200': { content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } }, description: ok }
+        '404': { $ref: '#/components/responses/NotFound' }
+      x-required-scope: session:read
+    delete:
+      operationId: terminateSession
+      tags: [sessions]
+      summary: Send SIGTERM to the session's PTY.
+      responses:
+        '204': { description: terminated }
+        '404': { $ref: '#/components/responses/NotFound' }
+      x-required-scope: session:write
+  /api/v1/sessions/{id}/input:
+    parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+    post:
+      operationId: sendSessionInput
+      tags: [sessions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SessionInput' }
+      responses:
+        '204': { description: bytes queued to stdin }
+        '410': { description: session_terminated }
+      x-required-scope: session:write
+
+  /api/v1/channels:
+    get:
+      operationId: listChannels
+      tags: [channels]
+      responses:
+        '200': { content: { application/json: { schema: { $ref: '#/components/schemas/ChannelList' } } }, description: ok }
+      x-required-scope: channel:read
+    post:
+      operationId: registerChannel
+      tags: [channels]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterChannel' }
+      responses:
+        '201': { content: { application/json: { schema: { $ref: '#/components/schemas/Channel' } } }, description: created }
+        '400': { $ref: '#/components/responses/Error' }
+      x-required-scope: channel:write
+      x-rate-limit: { sustained: '1 req/s' }
+  /api/v1/channels/{id}/send:
+    parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+    post:
+      operationId: sendChannelMessage
+      tags: [channels]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChannelSend' }
+      responses:
+        '202': { description: queued }
+        '503':
+          description: channel_not_connected
+      x-required-scope: channel:send
+      x-rate-limit: { sustained: '5 req/s', note: upstream platforms enforce their own caps }
+
+  /api/v1/memory/recall:
+    post:
+      operationId: recallMemory
+      tags: [memory]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MemoryRecallRequest' }
+      responses:
+        '200': { content: { application/json: { schema: { $ref: '#/components/schemas/MemoryRecallResponse' } } }, description: ranked hits }
+      x-required-scope: memory:read
+
+  /api/v1/integrations:
+    get:
+      operationId: listIntegrations
+      tags: [integrations]
+      responses:
+        '200': { description: ok, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Integration' } } } } }
+      x-required-scope: integration:read
+    post:
+      operationId: registerIntegration
+      tags: [integrations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterIntegration' }
+      responses:
+        '201': { description: created, content: { application/json: { schema: { $ref: '#/components/schemas/IntegrationWithSecret' } } } }
+      x-required-scope: integration:write
+  /api/v1/integrations/{id}/rotate:
+    parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+    post:
+      operationId: rotateIntegrationKey
+      tags: [integrations]
+      responses:
+        '200': { description: rotated, content: { application/json: { schema: { $ref: '#/components/schemas/IntegrationWithSecret' } } } }
+      x-required-scope: integration:write
+  /api/v1/integrations/_events:
+    get:
+      operationId: integrationsEventsStream
+      tags: [integrations]
+      summary: WebSocket event stream. Upgrade required.
+      responses:
+        '101': { description: switching protocols }
+      x-protocol: websocket
+      x-required-scope: 'event:subscribe:*'
+
+  /api/v1/health:
+    get:
+      operationId: health
+      tags: [activity]
+      security: []
+      responses:
+        '200': { content: { application/json: { schema: { type: object, properties: { status: { type: string }, version: { type: string }, uptime_s: { type: integer } } } } }, description: ok }
+
+components:
+  securitySchemes:
+    integrationKey:
+      type: http
+      scheme: bearer
+      description: Integration API key (od_live_xxx). Per-integration scope.
+    adminBearer:
+      type: http
+      scheme: bearer
+      description: Admin bearer token from /admin login.
+
+  responses:
+    Unauthenticated:
+      description: Missing or invalid credentials.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource not found or not visible to caller.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Error:
+      description: Generic error envelope.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:    { type: string, example: session_not_found }
+            message: { type: string }
+            hint:    { type: string }
+            request_id: { type: string }
+
+    SessionState:
+      type: string
+      enum: [pending, running, idle, ended, stopped]
+
+    Session:
+      type: object
+      required: [id, provider, cwd, state, created_at]
+      properties:
+        id:         { type: string,  example: s_42 }
+        provider:   { type: string,  example: claude }
+        cwd:        { type: string,  example: /home/dev/proj }
+        state:      { $ref: '#/components/schemas/SessionState' }
+        channel_id: { type: string,  nullable: true }
+        created_at: { type: string,  format: date-time }
+    SessionList:
+      type: object
+      properties:
+        data:       { type: array, items: { $ref: '#/components/schemas/Session' } }
+        pagination:
+          type: object
+          properties:
+            next_cursor: { type: string, nullable: true }
+            has_more:    { type: boolean }
+    SpawnRequest:
+      type: object
+      required: [provider, cwd]
+      properties:
+        provider:   { type: string,  example: claude }
+        cwd:        { type: string,  example: /home/dev/proj }
+        channel_id: { type: string,  nullable: true }
+        args:       { type: array, items: { type: string } }
+        env:        { type: object, additionalProperties: { type: string } }
+    SessionInput:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string }
+
+    Channel:
+      type: object
+      required: [id, kind, state]
+      properties:
+        id:    { type: string }
+        kind:  { type: string, enum: [telegram, slack, discord, feishu, dingtalk, wecom, wechat, bridge] }
+        state: { type: string, enum: [running, connecting, paused, failed] }
+        notify_events: { type: array, items: { type: string } }
+    ChannelList:
+      type: array
+      items: { $ref: '#/components/schemas/Channel' }
+    RegisterChannel:
+      type: object
+      required: [kind]
+      properties:
+        kind:  { type: string, enum: [telegram, slack, discord, feishu, dingtalk, wecom, wechat, bridge] }
+        config:
+          oneOf:
+            - { $ref: '#/components/schemas/TelegramConfig' }
+            - { type: object, description: kind-specific shape }
+    TelegramConfig:
+      type: object
+      required: [token]
+      properties:
+        token:           { type: string, pattern: '^\d+:[A-Za-z0-9_-]+$' }
+        default_chat_id: { type: integer }
+    ChannelSend:
+      type: object
+      required: [text]
+      properties:
+        text:        { type: string }
+        session_ref: { type: string }
+
+    MemoryRecallRequest:
+      type: object
+      required: [query]
+      properties:
+        query: { type: string }
+        scope: { type: array, items: { type: string } }
+        limit: { type: integer, default: 5 }
+    MemoryRecallResponse:
+      type: object
+      properties:
+        hits:
+          type: array
+          items:
+            type: object
+            properties:
+              text:       { type: string }
+              score:      { type: number, format: float }
+              scope:      { type: string }
+              source_cli: { type: string }
+
+    Integration:
+      type: object
+      required: [id, base_url, scopes, status]
+      properties:
+        id:        { type: string, example: int_wN79NrFxER53 }
+        name:      { type: string, example: pettracker }
+        base_url:  { type: string, format: uri }
+        scopes:    { type: array, items: { type: string } }
+        status:    { type: string, enum: [healthy, unhealthy, disabled] }
+        last_probed_at: { type: string, format: date-time }
+        rotated_at:     { type: string, format: date-time }
+    IntegrationWithSecret:
+      allOf:
+        - { $ref: '#/components/schemas/Integration' }
+        - type: object
+          properties:
+            api_key: { type: string, format: password, description: shown once on create / rotate }
+    RegisterIntegration:
+      type: object
+      required: [name, base_url, scopes]
+      properties:
+        name:     { type: string }
+        base_url: { type: string, format: uri }
+        scopes:   { type: array, items: { type: string } }
+
+x-llms-context: |
+  Machine-readable companions:
+    /llms.txt, /llms-full.txt — full doc index for LLM ingestion
+    /manifest.json — site-wide capability summary
+    /capabilities/{channels,providers,memory,sessions,integrations}.json — per-subsystem schemas
+    /mcp-manifest.json — MCP server descriptor for AI agents

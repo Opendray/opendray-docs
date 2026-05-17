@@ -1,102 +1,149 @@
+---
+kind: capability
+title: Telegram
+tldr: 从 @BotFather 拿 bot token,粘到 Channels → New → kind=telegram 即可。long-poll,不需要公网 URL。
+status: stable
+since: v0.1.0
+topic: channels
+related:
+  - channels/overview
+  - channels/notifications
+  - channels/routing
+capability:
+  - text
+  - html-parse-mode
+  - inline-buttons
+  - reply-routing
+  - edit-in-place
+  - typing-indicator
+inbound: long-poll
+outbound: rest
+public-url-required: false
+setup-time-minutes: 3
+x-implementation:
+  - internal/channel/telegram/
+  - internal/channel/hub.go
+x-api-version: telegram-bot-api-7
+---
+
 # Telegram
 
-**模式:** long-poll(无需公网 URL)
-**能力:** text · card · buttons · update_message · typing · reply_to_message
-**配置时间:** 约 3 分钟
+> **tldr:** 从 @BotFather 拿 bot token,粘到 **Channels → New → kind=telegram** 即可。long-poll,不需要公网 URL。
 
-这是配置最快的频道,因为 Telegram 允许 bot 自己 long-poll API — 不需要 webhook,不需要公网主机。
+## Setup
 
-## 1. 通过 BotFather 创建 bot
+| # | 操作 | 在哪做 |
+|---|---|---|
+| 1 | 给 [@BotFather](https://t.me/BotFather) 发 `/newbot`,保存 token `<digits>:<base64>` | Telegram |
+| 2 | (可选)把 bot 拉进目标群,然后给 [@userinfobot](https://t.me/userinfobot) 发 `/myid` 拿 `chat_id` | Telegram |
+| 3 | 打开 opendray **Channels** → **+ New** → kind 选 `telegram` → 粘 token | opendray 后台 |
+| 4 | (可选)粘 `default_chat_id`,未指定目标的发送会进这个聊天 | opendray 后台 |
+| 5 | 点 **Save**,状态徽章 2 秒内从 `connecting` 变 `running` | opendray 后台 |
 
-1. 在 Telegram 里搜索 [@BotFather](https://t.me/BotFather) 并开始 chat。
-2. 发送 `/newbot`。BotFather 会引导你填写:
-   - **Name** — chat 中显示的名字(例如 `OpenDray`)。
-   - **Username** — 必须以 `bot` 结尾(例如 `mycompany_opendray_bot`)。
-3. BotFather 回复一个像 `123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11` 的 token。**复制它** — 你会粘贴到 opendray 里。
+## Config schema
 
-![BotFather token reveal](/tutorial/telegram-botfather-token.png)
-
-## 2. 找到你的 chat ID
-
-你需要知道 opendray 默认发到哪个 chat(私聊 DM 或群组)。
-
-**简便路径:**
-
-1. 把 bot 加入一个群组,或者跟它开一个私聊。
-2. 在那个 chat 发任意一条消息(例如 `hi`)。
-3. 在浏览器里打开 `https://api.telegram.org/bot<TOKEN>/getUpdates`,把 `<TOKEN>` 换成你的 bot token。
-4. 在 JSON 里找 `"chat":{"id":...}`。正数 = DM,负数 = 群组,以 `-100` 开头的大负数 = 超级群组。
-
-```
-https://api.telegram.org/bot123456:ABC-DEF.../getUpdates
-
-{"ok":true,"result":[{
-  "update_id":...,
-  "message":{
-    "chat":{"id":7831238986,"type":"private"},
-    ...
-  }
-}]}
+```yaml
+# Channels → New → kind=telegram
+kind: telegram                          # 字面量,必填
+token: "<digits>:<base64-url>"          # 必填密文;正则 /^\d+:[A-Za-z0-9_-]+$/
+default_chat_id: integer                # 选填;未指定目标的发送进这里
+notify:
+  started:            false             # 默认 false
+  idle:               true              # 默认 true
+  ended:              true              # 默认 true
+  permission_ask:     true              # 默认 true
+repeat_policy: once-per-session         # 枚举: never | once-per-session | always
+snippet:
+  enabled:            false             # 默认 false
+  max_lines:          10                # 默认 10,范围 [1, 200]
+enabled: true                           # 不删频道也能临时关停
 ```
 
-那个 `7831238986` 就是你的 chat id。
+## Capabilities
 
-## 3.(可选)只允许 bot 在群组中使用
+| 能力 | 支持 | 实现备注 |
+|---|---|---|
+| 入站(long-poll) | ✓ | `internal/channel/telegram/poller.go` 里 `getUpdates` 循环 |
+| HTML 出站 | ✓ | `parse_mode=HTML`,支持 `<b>`、`<i>`、`<code>`、`<pre>`、`<a href>` |
+| inline 按钮 | ✓ | `reply_markup.inline_keyboard`;callback 走 hub 路由 |
+| 回复消息路由 | ✓ | 回复对应到原会话 stdin |
+| 原地编辑 | ✓ | `idle → running`、`running → done` 状态变更时复用 |
+| typing 指示 | ✓ | 会话产出过程中持续 `sendChatAction` |
+| 文件上传 | ✗ | 未实现(issue #channels-file-upload) |
+| 语音 / 视频 | ✗ | 范围外 |
 
-默认 bot 可以被加入任意群组。要把它锁定到只在你的群组:
+## Errors
 
-- BotFather → `/setjoingroups` → 选你的 bot → **Disable**。
+| code | http | 原因 | 修复 |
+|---|---|---|---|
+| `channel_kind_unsupported` | 400 | `kind` 字段不是字面量 `telegram` | 用字符串 `telegram` |
+| `tg_invalid_token` | 400 | token 形状不对 | 重新检查正则 `^\d+:[A-Za-z0-9_-]+$` |
+| `tg_unauthorized` | 401 | token 被吊销或错的 | 找 @BotFather 用 `/revoke` 然后 `/token` 重发 |
+| `tg_chat_not_found` | 404 | `chat_id` 错或 bot 被踢出群 | 重新邀请 bot 进群,重取 chat_id |
+| `tg_rate_limited` | 429 | 单聊 > 30 msg/s | 设 `repeat_policy: once-per-session`,按 `Retry-After` 退避 |
+| `tg_message_too_long` | 400 | HTML 转义后 > 4096 字符 | 减少 `snippet.max_lines` 或拆消息 |
 
-## 4. 在 opendray 中配置
+## Examples
 
-Channels → **New channel** → kind **Telegram**。
+### 通过 REST 发送
 
-| 字段 | 值 |
-|---|---|
-| **Bot token** | 步骤 1 的 BotFather token |
-| **Default chat ID** | 步骤 2 的 chat id(可选 — 当没有 `ReplyCtx` 时用于出站) |
-| Repeat policy | 保留默认 "Once per session" |
-| Terminal snippet | 保持开启,"No cap" |
+```http
+POST /api/v1/channels/ch_tg_main/send
+Authorization: Bearer od_live_xxxxxxxxxx
+Content-Type: application/json
 
-保存,**Enabled = on**。
-
-![New Telegram channel form](/tutorial/telegram-new-channel.png)
-
-## 5. 验证
-
-几秒后卡片翻转到 `RUNNING`。点卡片上的 **Test** — 你应该在 chat 看到 *"OpenDray channel test ✓"*。
-
-在 chat 里给 bot 发送 `/help` — opendray 回复已注册命令的列表。这证明入站 polling 工作正常。
-
-## 6.(可选)添加斜杠命令自动补全
-
-Telegram 客户端会为已知命令显示提示下拉框。把命令告诉 BotFather:
-
-- `/setcommands` → 选 bot → 粘贴:
-
-```
-help - List available commands
-status - Show channel status and capabilities
-notify - Toggle notifications: /notify on|off
-sessions - List recently-notified sessions
-select - Pin a session for replies
-cancel - End a session
-resume - Reply to resume a session
+{
+  "text": "构建 #42 通过",
+  "session_ref": "s_42"
+}
 ```
 
-这纯粹是装饰 — opendray 不论你设没设置都接受命令。
+响应:
 
-## 限制
+```json
+HTTP/1.1 202 Accepted
+{ "message_id": "tg_847", "queued_at": "2026-05-17T10:24:00Z" }
+```
 
-- Bot token 是 bearer 凭证。任何人拿到 token 都能以你的 bot 名义发言。如果泄露:BotFather → `/revoke` → 选 bot → 确认。
-- 内联按钮的 `callback_data` 被 Telegram 限制为 64 字节。opendray 的命令载荷(`cmd:/cancel <session-id>`)在范围内。
-- 语音消息、贴纸、位置 — opendray 不解码这些。只有文本 + 按钮点击会成为会话的入站。
+### 入站回复 → stdin
 
-## 故障排查
+用户在 Telegram 回复一张通知卡。hub:
 
-服务器日志里出现 **"telegram: getUpdates failed; backing off"**:
-- token 错(再粘一次,确保前后无空格)
-- 或者两个 opendray 实例用同一个 token — Telegram 的 getUpdates 是单消费者的,会 409 拒绝。停掉重复的那个。
+1. 通过 `getUpdates` 收到 `update.message.reply_to_message.message_id`
+2. 查出原卡是哪个会话发的
+3. 把回复文本写进那个会话的 stdin
 
-**Bot 在群组里看不到消息**:
-- BotFather → `/setprivacy` → 选 bot → **Disable**(默认是 "Enable",意思是 bot 只看到命令和 @提及)。
+零额外配置 —— 开箱即用。
+
+## Limitations
+
+| 限制 | 数值 | 备注 |
+|---|---|---|
+| 消息正文 | 4096 字符 | Telegram 限制;HTML 转义算在内 |
+| inline 按钮数 | 100 / 条 | Telegram 限制 |
+| callback data | 64 字节 | Telegram 限制;opendray 用不透明 ID |
+| 单聊发送速率 | 30 / 秒 | Telegram 限制;`repeat_policy` 配合 |
+| 全 bot 发送速率 | 30 / 秒 | 跨所有聊天的总和 |
+
+<details>
+<summary>📖 叙事说明</summary>
+
+Telegram 是最容易配的频道,因为它不需要公网 URL —— opendray 通过
+long-poll 主动拉 Telegram 的 update,所以家用 NAT 后面也能跑。流程
+就三步:
+
+1. 在 Telegram 里找 [@BotFather](https://t.me/BotFather),发 `/newbot`,
+   给 bot 起个显示名 + `_bot` 后缀的用户名。
+2. BotFather 回你一个 token,长得像 `1234567890:ABCdef...`。存下来
+   (这是唯一一次显示,后续要找 BotFather 重发)。
+3. opendray **Channels** → **+ New** → kind 下拉选 `telegram` → 粘 token。
+
+大多数场景还想配 *default chat ID*:这是当 session 通知没指定目标时
+opendray 默认推到的聊天。先把 bot 加进想用的群,然后给
+[@userinfobot](https://t.me/userinfobot) 发 `/myid`,它会返回数字 ID。
+
+点 **Save** 后,频道状态会从 `connecting` 转到 `running`,通常 2 秒
+以内。如果一直卡在 `connecting`,点 **Edit** 看 token 格式。如果直接
+报错变成 `failed`,看上面的 **Errors** 表查代码对应的修复方法。
+
+</details>

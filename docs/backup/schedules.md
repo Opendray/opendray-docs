@@ -1,52 +1,87 @@
+---
+kind: capability
+title: Backup — schedules
+tldr: Cron expression triggers backup runs. Fan-out to all enabled targets. Retention pruning runs after each successful upload. Default `0 2 * * *` (2am daily).
+status: stable
+since: v0.1.0
+topic: backup
+related: [backup/overview, backup/targets, backup/quickstart]
+capability: [cron-trigger, multi-target-fanout, retention-prune]
+inbound: cron
+outbound: target
+x-implementation: [internal/backup/scheduler.go]
+---
+
 # Backup — schedules
 
-A *schedule* is "take a backup automatically every N seconds and
-prune anything beyond N kept rows."
+> **tldr:** Cron expression triggers backup runs. Fan-out to all enabled targets. Retention pruning runs after each successful upload. Default `0 2 * * *` (2am daily).
 
-## Cadence
+## Config
 
-v1 uses simple **interval** scheduling, not cron expressions.
-You pick "every 24 hours / 6 hours / 30 minutes" via the New
-schedule dialog (Schedules tab on `/backups`). cron syntax is
-deferred to v1.1.
+```toml
+[backup.schedule]
+enabled    = true
+expression = "0 2 * * *"      # cron — daily 2am
+timezone   = "Asia/Shanghai"  # IANA tz; falls back to system tz
+retention_days_default = 30
 
-A scheduler goroutine wakes every 30 seconds and:
+[backup.schedule.advanced]
+max_dump_duration_minutes = 30
+post_run_command = ""         # optional: shell hook after dump
+```
 
-1. Atomically claims one due schedule via
-   `SELECT … FOR UPDATE SKIP LOCKED LIMIT 1`. Multiple opendray
-   instances cooperate safely on the same table.
-2. Runs the backup synchronously (sequential per opendray
-   instance — no parallel runs of the same schedule).
-3. After success applies retention: keep N most recent
-   `succeeded` backups *for that target*, soft-delete the rest
-   (their blob is removed from the target; row stays at
-   `status='deleted'` for audit).
+## Cron examples
 
-## Retention semantics
+| Expression | When |
+|---|---|
+| `0 2 * * *` | daily 2am |
+| `0 */6 * * *` | every 6h |
+| `0 3 * * 0` | Sundays 3am |
+| `*/15 * * * *` | every 15 min (heavy — use only for testing) |
 
-`retention = 7` means "always keep the 7 newest succeeded
-backups per target." Failed and deleted rows don't count — only
-`succeeded` ones. The default in the UI is 7; the floor is 0
-(meaning "delete every successful backup immediately after
-making it," which only makes sense as a smoke test).
+## Per-run flow
 
-## What happens on crash
+| # | Step |
+|---|---|
+| 1 | scheduler fires cron entry |
+| 2 | pg_dump → encrypt with `OPENDRAY_BACKUP_KEY` → write to staging temp file |
+| 3 | for each enabled target in parallel: upload |
+| 4 | each target succeeds → retention prune for that target (delete files older than `retention_days`) |
+| 5 | any target fails → flagged in `/backups` UI; staging file kept for retry |
+| 6 | emit `backup.run.completed` / `backup.run.failed` event |
 
-- A backup row stuck at `status='running'` (because opendray
-  crashed mid-pipeline) is reset to `failed` with a clear
-  marker error after 1 hour. Reset runs automatically at next
-  startup.
-- A schedule that crashed mid-run already had its
-  `next_run_at` bumped; the failed run is in `backups` so you
-  can see why it failed without it blocking the cadence.
+## Per-target retention
 
-## Disabling vs deleting
+```yaml
+# inside target config
+retention_days: 30          # default; per-target override
+retention_min_files: 3      # keep at least 3 even if all > retention_days
+```
 
-A schedule has `enabled` toggle separate from delete. Toggle
-to off when you want to pause without losing the configuration.
-Delete removes the schedule but leaves prior backups (they're
-linked via `schedule_id` which becomes NULL — schema uses
-`ON DELETE SET NULL`).
+## Manual run
 
-A target referenced by an enabled schedule **cannot be deleted**
-(`ON DELETE RESTRICT`). Disable / delete the schedule first.
+| Where | Action |
+|---|---|
+| `/backups` UI | Run now button (uses staging path; same fan-out) |
+| CLI | `opendray backup run-now` |
+| API | `POST /api/v1/backup/runs` |
+
+## Capabilities
+
+| feature | supported |
+|---|---|
+| cron expression | ✓ standard 5-field |
+| per-target retention | ✓ |
+| max run duration | ✓ (kill if exceeded) |
+| post-run shell hook | ✓ |
+| Skip-if-no-changes | ✗ (always dumps) |
+| Incremental | ✗ (always full pg_dump) |
+
+## Errors
+
+| code | when | fix |
+|---|---|---|
+| `backup_pg_dump_failed` | binary missing / wrong major version | check `OPENDRAY_BACKUP_PG_DUMP_PATH` |
+| `backup_encryption_failed` | key missing or wrong length | re-export `OPENDRAY_BACKUP_KEY` and restart |
+| `backup_dump_timeout` | exceeded `max_dump_duration_minutes` | raise or investigate slow DB |
+| `backup_target_upload_failed` | per-target failure | see target Errors |

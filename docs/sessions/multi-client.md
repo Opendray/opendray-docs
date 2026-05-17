@@ -1,11 +1,98 @@
+---
+kind: concept
+title: Multi-client session access
+tldr: Multiple clients can attach to one session (web + mobile + Telegram), but only one should DRIVE at a time. PTY has a single size — last resize wins. For independent state, spawn separate sessions in the same cwd.
+status: stable
+since: v0.1.0
+topic: sessions
+related:
+  - sessions/overview
+  - channels/overview
+references:
+  capabilities: [sessions]
+x-implementation:
+  - internal/session/multiclient.go
+---
+
 # Multi-client session access
 
-opendray lets the same session be opened from multiple clients at
-once (web admin, mobile app, Telegram), but **strongly recommends
-only one client driving it at any given moment**. The reason sits in
-the underlying architecture, not in opendray itself.
+> **tldr:** Multiple clients can attach to one session (web + mobile + Telegram), but only one should DRIVE at a time. PTY has a single size — last resize wins. For independent state, spawn separate sessions in the same cwd.
 
-## Why web and mobile can't each have their own view
+## Why one-PTY constraint exists
+
+| Layer | Property |
+|---|---|
+| CLI (Claude / Codex / Gemini) | single process |
+| PTY | one size at a time (`TIOCGWINSZ`) |
+| Layout style | absolute positioning ("move cursor to (45, 10)") |
+| All clients receive | the same already-laid-out byte stream |
+
+The mobile xterm and the web xterm are two windows on the same
+image. No middleware can render the CLI at two different sizes
+simultaneously.
+
+## Symptoms when multiple clients drive
+
+| Trigger | What happens |
+|---|---|
+| Web drag-to-resize | FitAddon fires → PTY resized → mobile TUI reflows mid-conversation |
+| Mobile connects | sets PTY to mobile width → web shows wide trailing empty cells |
+| Desktop + mobile alternating | last resizer wins; TUI reflows back and forth |
+
+## Three workable approaches
+
+### A. Recommended — one client at a time
+
+| Where you are | Use |
+|---|---|
+| Desktop | web admin |
+| Couch / on the go | mobile app |
+| Away from machine | Telegram idle notifications (full prose, not screenshots) |
+
+### B. Two sessions, same cwd, independent state
+
+| Trade-off | |
+|---|---|
+| ✓ Independent | each session has its own PTY + CLI process |
+| ✗ Split state | mobile Gemini doesn't see what desktop Gemini knows |
+| Fits | "desktop runs long task, mobile fires quick side question" |
+| Doesn't fit | "continue my desktop conversation from my phone" |
+
+### C. Desktop only on web, mobile only on app — separate sessions
+
+Most natural workflow: each device owns its own session set. No
+cross-device CLI state sharing at all. Idle notifications + Telegram
+commands (`/list` / `/end` / `/resume`) still work cross-device.
+
+## Capability matrix
+
+| Concern | Single client | Multi-viewer | Multi-driver |
+|---|---|---|---|
+| Stable layout | ✓ | ✓ | ✗ |
+| Same conversation visible everywhere | ✓ (only here) | ✓ | ✓ |
+| Each client independent reflow | ✗ | ✗ | ✗ (impossible with TUI) |
+| Independent conversation state | ✗ | ✗ | ✗ (option B fixes this) |
+| Telegram idle ping anywhere | ✓ | ✓ | ✓ |
+
+## Why tmux doesn't solve this
+
+tmux takes the **minimum** of all attached client sizes and uses
+that for every client. Still one size, still a compromise — the
+decision is moved into tmux instead of opendray. No fundamental
+difference.
+
+## What true independent multi-client would require
+
+Client-side conversation state (lives on client, not in CLI process)
+plus a state-sync layer. That's how Claude / Gemini / Codex's HTTP
+APIs work — but NOT how the CLI TUIs work. opendray wraps a TUI CLI
+and inherits the TUI's architectural constraints.
+
+If Anthropic / Google ever ship a stateful HTTP API CLI, opendray
+can revisit. Until then: use option A or B.
+
+<details>
+<summary>📖 Narrative explanation</summary>
 
 ```
    Claude / Gemini / Codex CLI process
@@ -20,75 +107,15 @@ the underlying architecture, not in opendray itself.
    xterm       xterm
 ```
 
-The CLI is a **single process**. At startup it asks the OS via
+The CLI is a single process. At startup it asks the OS via
 `TIOCGWINSZ` "how wide is this terminal?" and lays out its UI on
-that fixed character grid with **absolute positioning** ("move cursor
-to (45, 10)" sequences).
-
-Every client receives **the same already-laid-out byte stream**. The
-mobile xterm and the web xterm are essentially two windows showing
-the same image — **no middleware can render the CLI at two different
-sizes simultaneously**.
+that fixed character grid with absolute positioning sequences.
 
 In practice, whenever multiple clients are connected at once, at
-least one of them ends up with a worse visual experience than it
-would in solo use. Common symptoms:
-
-- **Web drag-to-resize** → FitAddon fires → PTY resized → the
-  mobile TUI reflows mid-conversation.
-- **Mobile connects** → sets PTY to the mobile width → the web
-  window shows wide trailing empty cells.
-- **Desktop + mobile alternating** → whoever resized last wins, and
-  the TUI reflows back and forth.
-
-## Three workable paths
-
-### A. Recommended — one client at a time
-
-The simplest, most reliable approach. A typical workflow:
-
-- Desktop → use the web admin.
-- On the go / on the couch / quick check-in → use the mobile app.
-- Away from the machine → let Telegram idle notifications keep you
-  informed.
+least one ends up with a worse visual experience than solo use.
 
 opendray's idle notifications push the **full prose reply** from
-Claude / Gemini into Telegram (no more screenshots-only fallback),
-so "don't open the web admin, just watch Telegram for updates"
-remains a fully viable workflow.
+Claude / Gemini into Telegram (not screenshots), so "don't open the
+web admin, just watch Telegram" remains a viable workflow.
 
-### B. Two sessions (same cwd, independent state)
-
-If you genuinely want web + mobile to operate independently, spawn
-**two** sessions in the same cwd. Each has its own PTY, its own CLI
-process, and they don't interfere with each other.
-
-Trade-off: **conversation state is split**. What you tell the
-mobile Gemini, the web Gemini doesn't see. This fits "desktop runs
-a long task, mobile fires off a quick side question" — it doesn't
-fit "continue my desktop conversation from my phone".
-
-### C. Desktop only on web, mobile only on the app — separate sessions
-
-The most natural workflow: each device owns its own session set. No
-cross-device sharing of CLI state at all. Idle notifications and
-Telegram commands (`/list`, `/end`, `/resume`, …) still work
-cross-device.
-
-## Why tmux doesn't solve this
-
-tmux handles multiple clients by **taking the minimum of all
-attached client sizes** and using that for every client. It's still
-one size, still a compromise — the decision is just moved into tmux
-instead of being opendray's. No fundamental difference.
-
-## What true independent multi-client would require
-
-It would need **client-side conversation state** (state lives on the
-client, not in the CLI process) plus a state-sync layer. That's how
-Claude/Gemini/Codex's HTTP APIs and web UIs work, but **not** how
-the CLI TUIs work. opendray wraps a TUI CLI, so it inherits the
-TUI's architectural constraints.
-
-If Anthropic / Google ever ship a CLI with a stateful HTTP API,
-opendray can revisit this. Until then — use option A or B.
+</details>

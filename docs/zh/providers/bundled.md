@@ -1,71 +1,112 @@
-# 内置供应商
+---
+kind: capability
+title: 内置 providers
+tldr: 每个 CLI 的参考。claude(anthropic,JSONL + 多账号 + MCP)、codex(openai,opaque PTY)、gemini(google,env 认证)、shell($SHELL 兜底)。
+status: stable
+since: v0.1.0
+topic: providers
+related:
+  - providers/overview
+  - providers/custom
+  - providers/claude-accounts
+capability:
+  - claude
+  - codex
+  - gemini
+  - shell
+x-implementation:
+  - internal/catalog/builtins/claude.json
+  - internal/catalog/builtins/codex.json
+  - internal/catalog/builtins/gemini.json
+  - internal/catalog/builtins/shell.json
+---
 
-opendray 自带最常见的 AI 编程 CLI 的 manifest。下面每个章节
-讲第一次拉起对应供应商时该有什么预期。
+# 内置 providers
 
-## Claude Code
+> **tldr:** 每个 CLI 的参考。`claude`(anthropic,JSONL + 多账号 + MCP)、`codex`(openai,opaque PTY)、`gemini`(google,env 认证)、`shell`(`$SHELL` 兜底)。
 
-| 字段 | 值 |
-|---|---|
-| 供应商 id | `claude` |
-| 默认 executable | `claude`(通过 `$PATH` 解析)|
-| 默认参数 | 无 |
-| 多账号支持 | 是 — 见 [Claude 账号](#providers-claude-accounts) |
-| JSONL transcript | 是 — opendray 读它来填充通道通知 |
-| Privileged intents | 不适用 |
+## 一览
 
-注意事项:
+| Provider id | 厂商 | 二进制 | 多账号 | JSONL transcript | MCP | 备注 |
+|---|---|---|---|---|---|---|
+| `claude` | Anthropic | `claude` | ✓ | ✓(`~/.claude/projects/`) | ✓ | 主 provider;配置最深 |
+| `codex` | OpenAI | `codex` | 仅 env | ✗ | ✗ | screen snapshot 做通知 |
+| `gemini` | Google | `gemini` | 仅 env | ✗ | ✗ | 注意免费 quota |
+| `shell` | system | `$SHELL` | n/a | ✗ | ✗ | 不是 AI —— 普通交互 shell |
 
-- Claude Code 在
-  `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl` 存
-  per-cwd 的 transcript。opendray 直接读这个文件来填充通知
-  片段 — 不需要屏幕抓取。
-- `--continue` 标志会在 cwd 里恢复最近一次对话。在拉起对话框
-  的 *Args* 字段里加上它,可以从你上次停下的地方继续。
-- 权限模式(`bypass permissions` 等)是 Claude TUI 的特性 —
-  opendray 的 chrome 过滤会从通知片段里剥掉提示横幅,但
-  不会改变底层行为。
-
-## Codex
-
-| 字段 | 值 |
-|---|---|
-| 供应商 id | `codex` |
-| 默认 executable | `codex` |
-| 默认参数 | 无 |
-| 多账号支持 | 每个环境一组凭据(没有 per-session 绑定)|
-| JSONL transcript | 否 — opendray 用屏幕快照做通知 |
-
-注意事项:
-
-- Codex 用自己的 JSON-RPC 协议处理工具调用;opendray 把它
-  当作一个不透明的 CLI,只通过 PTY 中继字节。
-- 免费层有速率限制;如果 Codex 返回 "rate limit exceeded",
-  它会在终端里显现出来,opendray 不会拦截它。
-
-## Gemini CLI
+## `claude` — Claude Code
 
 | 字段 | 值 |
 |---|---|
-| 供应商 id | `gemini` |
-| 默认 executable | `gemini` |
-| 默认参数 | 无 |
-| 多账号支持 | 基于环境变量 |
-| JSONL transcript | 否 |
+| `command` | `claude`(`$PATH` 解析) |
+| `default_args` | 无 |
+| 多账号 | ✓ 见 [Claude accounts](./claude-accounts) |
+| Transcript | `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl` |
+| `runtime_options.bypass_permissions` | bool,默认 `false`(传 `--bypass-permissions`) |
+| `runtime_options.max_turns` | int,默认 `0`(不限) |
+| `runtime_options.skills` | bool,默认 `true`(opendray skill 自动注入) |
+| 通知来源 | 读 JSONL 最后一轮(assistant text + tool calls + results) |
+| TUI chrome 过滤 | 剥除 model bar、"bypass permissions" 提示、状态 spinner、分隔线 |
+| 恢复 | `--continue` 恢复 cwd 内最近对话 |
 
-注意事项:
+## `codex` — Codex CLI
 
-- Gemini 的免费配额每天重置;如果一个会话开始报 429,去
-  配额仪表盘看一下。
-- 它的交互提示符更像 shell,不像 Claude 的 TUI;chrome 过滤
-  在这里是空操作(没东西可剥)。
+| 字段 | 值 |
+|---|---|
+| `command` | `codex` |
+| `default_args` | 无 |
+| 认证 | env-based(`OPENAI_API_KEY`);每 env 一份凭据 |
+| Transcript | 无 — opendray 用 vt10x screen snapshot |
+| Tool use | OpenAI JSON-RPC;opendray 当 opaque PTY |
+| 通知来源 | vt10x 最后 N 行 |
+| TUI chrome 过滤 | 空操作(codex shell 风格,无可剥) |
+| 限流 | free-tier — 超限在终端显示 |
 
-## 纯 shell
+## `gemini` — Gemini CLI
 
-如果你想要一个普通的 shell 会话(没有 AI),你可以注册一个
-指向 `bash` / `zsh` / `fish` 的自定义供应商(见
-[自定义供应商 manifest](#providers-custom))。opendray 一视同仁 —
-同样的 PTY、同样的空闲检测、同样的环形缓冲。
+| 字段 | 值 |
+|---|---|
+| `command` | `gemini` |
+| `default_args` | 无 |
+| 认证 | env-based(`GOOGLE_API_KEY`) |
+| Transcript | 无 |
+| 通知来源 | vt10x snapshot |
+| TUI chrome 过滤 | 空操作 |
+| 日 quota | UTC 午夜重置;429 时检查 Gemini dashboard |
 
-当你需要在 opendray 主机上快速来一个交互式会话又不想 SSH
-进去的时候,挺有用。
+## `shell` — 普通 shell
+
+| 字段 | 值 |
+|---|---|
+| `command` | `$SHELL` |
+| `default_args` | `-l`(login shell) |
+| AI | ✗ — 非 AI provider |
+| 用途 | 在 opendray 主机上快速起交互 shell,不用 SSH |
+| 行为 | 跟 AI provider 一样的 PTY / idle 检测 / ring buffer |
+
+## Errors
+
+| code | http | 原因 | 修复 |
+|---|---|---|---|
+| `provider_unavailable` | 503 | 二进制不在 PATH 或不可执行 | 装上,或在 provider 配置里写绝对路径 |
+| `provider_disabled` | 400 | DB override 里 `enabled: false` | 在 Providers 页打开 |
+| `claude_account_not_bound` | 400 | spawn 选的 Claude 账号已不存在 | 在 spawn 对话框重选账号 |
+
+<details>
+<summary>📖 叙事说明</summary>
+
+Claude 是配置最深的 provider 因为它是主要那个。其他 provider 用
+单一凭据集合,来自环境变量,没有 per-session 绑定 —— 大多数场景够
+用但没那么灵活。
+
+Codex 用自己的 JSON-RPC 协议做 tool use;opendray 当 opaque CLI,
+只透传 PTY 字节。free-tier 限流会直接出现在终端 —— opendray 不拦截。
+
+Gemini 日 quota 重置 —— 429 时去 Google AI Studio 看。交互 prompt
+比 Claude 的 TUI 更 shell 化,chrome 过滤是 no-op。
+
+要普通 shell 会话(无 AI),注册 `shell` 或自定义 provider 指向
+`bash` / `zsh` / `fish` —— 同样的 PTY、idle 检测、ring buffer。
+需要快速远程 shell 时有用,不用 SSH。
+
+</details>

@@ -1,52 +1,53 @@
-# 集成 — 概览
+---
+kind: concept
+title: 集成 Integrations — 概览
+tldr: opendray = 受管反向代理 + scope 限权 API key + 事件 WS。你的 pettracker / materialscout 应用注册成集成,共享一份 Claude Pro 订阅,有独立审计。
+status: stable
+since: v0.1.0
+topic: integrations
+related: [integrations/auth-model, integrations/reverse-proxy, integrations/call-log, integrations/events-ws, consuming/overview]
+references:
+  capabilities: [integrations]
+x-implementation: [internal/integration/]
+---
 
-Integrations 页面把 opendray 变成一个面向第三方工具的、带签名 token 的、受管反向代理网关。这一页就是项目描述中"第三方 API 网关"这句话的来源。
+# 集成 Integrations — 概览
 
-## 你能拿到什么
+> **tldr:** opendray = 受管反向代理 + scope 限权 API key + 事件 WS。你的 pettracker / materialscout 应用注册成集成,共享一份 Claude Pro 订阅,有独立审计。
 
-| 能力 | 章节 |
+## 是什么
+
+| 关心点 | opendray 提供 |
 |---|---|
-| 每个集成自己的 API key(可轮转) | 集成列表 |
-| 通过 opendray 反向代理其他 HTTP 服务并加上认证 | 反向代理挂载 |
-| 审计日志 + 每次调用的归属信息 | 调用日志 |
-| 让外部工具订阅 opendray 的事件总线 | Events WebSocket |
+| 每 app 一个 API key | scope 限权(如 `session:read`、`event:subscribe:session.*`) |
+| 反向代理 | `/api/v1/proxy/<prefix>/*` → 你的 app 的 `base_url/*` |
+| 事件推送 | `/api/v1/integrations/_events` WS 带 topic 过滤 |
+| 健康探活 | 30s 探活你的 app 的 `GET /`;2 次失败 → unhealthy |
+| 调用审计 | 每条调用记到 `integration_call_log`(跟 `audit_log` 分开为减压) |
+| 密钥轮换 | 24h grace 期,一键 rotate |
 
-下面每一节都有深入说明。
-
-## 为什么要把流量过 opendray?
-
-三个具体用例:
-
-### 1. 单一认证入口
-
-你在内部跑了 4 个工具(Grafana、一个自定义仪表板、AI 用量追踪器、一个 webhook 接收器)。每一个都有自己一套认证方式。opendray 可以把它们都代理过来,对外只暴露一个管理员 token + 一组集成 key。
-
-### 2. 可审计的 AI 用量
-
-跑在你笔记本上的某个工具想调用 Anthropic 的 API。把它的流量经过 opendray,每次调用都会被记录,带上调用方(集成 key)+ 端点 + 耗时 + 状态 — 这是账单级别的审计轨迹。
-
-### 3. Webhook 扇出
-
-外部服务(GitHub、Stripe、CI pipeline)发 webhook。opendray 在一个公开端点接收它们,用集成的 key 签名,然后在事件总线上重新发布,让任何会话、频道或管理脚本都能响应。
-
-## 一段话讲清认证模型
-
-两种 token,都用 Bearer:
-
-- **管理员 token** — 完全访问。Web UI 和管理 CLI 使用。存在 `config.toml` 或环境变量里。
-- **集成 key** — 有作用域、每个集成一份、可轮转。在 DB 里以 hash 形式存储;明文只在创建时展示一次。供外部调用方使用。
-
-`/api/v1/` 下的端点两种都接受;当用集成 key 调用时,中间件把这次调用归属到该集成,这样调用日志能展示"谁做了什么"。
-
-双重认证中间件的顺序很重要:`auth` 先跑,然后 `integration call logger` 包住响应,这样调用归属才能看到 principal。
-
-![Integrations page](/tutorial/integrations-layout.png)
-
-## 接着读
-
-| 主题 | 章节 |
+| Capability JSON | 权威源 |
 |---|---|
-| Token 类型以及它们如何相互作用 | Auth model |
-| 通过 opendray 挂载第三方 API | Reverse proxy |
-| 审计 / 归属表 | Call log |
-| 从 opendray 外部订阅事件 | Events WebSocket |
+| [/capabilities/integrations.json](/capabilities/integrations.json) | scope、proxy 细节、事件 |
+
+## 跟 Remote Claude Code(RCC)插件的区别
+
+| RCC | opendray 集成 |
+|---|---|
+| 无 API key | per-app scope key |
+| 不透明代理 | scope 强制网关 |
+| 轮询 | WS 事件推送 |
+| 无健康检查 | 30s 健康探活 |
+| 无 per-integration 审计 | per-integration 审计 + 成本追踪 |
+
+## 何时读什么
+
+| 主题 | 读 |
+|---|---|
+| Scope 词汇 + auth 怎么工作 | [auth-model](./auth-model) |
+| 反向代理细节(header、body 限制) | [reverse-proxy](./reverse-proxy) |
+| 事件推送 WS | [events-ws](./events-ws) |
+| Per-integration 调用日志 | [call-log](./call-log) |
+| 写一个 **消费** opendray 的 app | [consuming/overview](../consuming/overview) |
+
+![Integrations 页](/tutorial/integrations-layout.png)

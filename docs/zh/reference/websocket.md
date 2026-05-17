@@ -1,4 +1,17 @@
+---
+kind: endpoint
+title: WebSocket 事件
+tldr: 长连接事件流。Bearer 认证。订阅 topic 模式。25s keepalive。无 replay — 用 REST events?since=<seq> 回填。
+status: beta
+since: v0.1.0
+topic: reference
+related: [reference/overview, reference/rest, integrations/events-ws, consuming/websocket-events, activity/topics-catalogue]
+x-implementation: [internal/integration/events.go]
+---
+
 # WebSocket 事件 <Badge type="beta">Beta</Badge>
+
+> **tldr:** 长连接事件流。Bearer 认证。订阅 topic 模式。25s keepalive。无 replay —— 用 REST `events?since=<seq>` 回填。
 
 长连接事件流,推送实时的会话输出、频道投递、记忆写入、通知。
 

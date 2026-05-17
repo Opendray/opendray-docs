@@ -1,4 +1,17 @@
+---
+kind: endpoint
+title: REST 端点
+tldr: 管理 sessions / channels / providers / memory / integrations 的同步 HTTP API。Authorization header 里 Bearer key 认证。权威源 — /openapi.yaml。
+status: beta
+since: v0.1.0
+topic: reference
+related: [reference/overview, reference/websocket, reference/errors, reference/rate-limits, consuming/rest-api]
+x-implementation: [internal/gateway/, docs/public/openapi.yaml]
+---
+
 # REST 端点 <Badge type="beta">Beta</Badge>
+
+> **tldr:** 管理 sessions / channels / providers / memory / integrations 的同步 HTTP API。Authorization header 里 Bearer key 认证。权威源 —— [/openapi.yaml](/openapi.yaml)。
 
 管理会话、频道、provider、记忆、集成 key 的同步 HTTP API。
 

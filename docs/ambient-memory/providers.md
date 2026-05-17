@@ -1,105 +1,74 @@
+---
+kind: capability
+title: Ambient Memory — providers
+tldr: 3 summarizer backends — Anthropic API, OpenAI-compatible HTTP (Ollama / OpenAI / LocalAI), and a noop dry-run mode. Config under [ambient.summarizer].
+status: stable
+since: v0.1.0
+topic: ambient-memory
+related:
+  - ambient-memory/overview
+  - ambient-memory/capture-rules
+  - memory-workers/overview
+capability:
+  - anthropic
+  - openai-compat
+  - noop
+inbound: capture-queue
+outbound: api
+x-implementation:
+  - internal/memory/summarizer/
+---
+
 # Ambient Memory — providers
 
-A **summarizer provider** is the LLM (or wrapping service) that
-turns a transcript window into a JSON `{facts: [...]}` array. v1
-ships five provider kinds covering both the local-first and
-cloud-API paths.
+> **tldr:** 3 summarizer backends — Anthropic API, OpenAI-compatible HTTP (Ollama / OpenAI / LocalAI), and a `noop` dry-run mode. Config under `[ambient.summarizer]`.
 
-## `ollama` — local
+## Providers
 
-Most direct local-first option. Run `ollama pull qwen2.5:7b`
-(or any chat model) and point opendray at the daemon.
+| id | Backend | Auth | Cost | Notes |
+|---|---|---|---|---|
+| `anthropic` | Claude API (haiku / sonnet) | `ANTHROPIC_API_KEY` | paid per token | highest quality summaries |
+| `openai-compat` | any OAI-compat (Ollama / OpenAI / LocalAI / vLLM) | api_key (blank for local) | depends | recommended default for local |
+| `noop` | none — dry-run | n/a | free | sees what WOULD be captured; nothing written |
 
-```
-Base URL:  http://localhost:11434
-Model:     qwen2.5:7b
-API key:   (none)
-```
+## Config
 
-Speaks ollama's native `/api/chat` endpoint with
-`format: "json"` for strict JSON output.
+```toml
+[ambient.summarizer]
+provider = "openai-compat"     # anthropic | openai-compat | noop
+model    = "llama3.1:8b"       # ignored for noop
 
-## `lmstudio` — local with GUI
+[ambient.summarizer.anthropic]
+api_key = "sk-ant-..."
+model   = "claude-haiku-4-5-20251001"
 
-LM Studio exposes an OpenAI-compatible HTTP server. Friendlier
-GUI than ollama but otherwise interchangeable.
-
-```
-Base URL:  http://localhost:1234/v1
-Model:     <model name from LM Studio's loaded list>
-API key:   (none — LM Studio ignores)
+[ambient.summarizer.openai_compat]
+base_url = "http://localhost:11434/v1"
+api_key  = ""                  # blank for Ollama
 ```
 
-Speaks chat completions with
-`response_format: {"type": "json_object"}`.
+## Provider comparison
 
-## `anthropic` — Claude API
+| Concern | anthropic | openai-compat (local) | openai-compat (cloud) | noop |
+|---|---|---|---|---|
+| Setup time | 2 min | 10 min (model pull) | 2 min | 0 |
+| Cost | $0.001/summary | free | $0.0001–0.01/summary | free |
+| Quality | ✓✓✓ | ✓✓ (model-dep) | ✓✓✓ | n/a |
+| Privacy | sends to Anthropic | local | sends to provider | n/a |
+| Latency | 1–3s | 2–8s (CPU) | 0.5–2s | 0 |
 
-Use Haiku 4.5 for the cheapest / fastest extraction. The Sonnet
-4.6 and Opus 4.7 entries in the cost table are there for
-operators who want higher quality.
+## Recommended setup
 
-```
-Base URL:  https://api.anthropic.com  (default; can override)
-Model:     claude-haiku-4-5
-API key:   sk-ant-…  (encrypted at rest with backup cipher)
-```
+| Phase | Recommended |
+|---|---|
+| Trying it out | `noop` → see what would be captured |
+| Production self-host | `openai-compat` + Ollama `llama3.1:8b` |
+| Heavy use, no GPU | `anthropic` `claude-haiku-4-5-20251001` (cheap, fast) |
 
-Uses Anthropic's tool-use API
-(`tool_choice = record_facts`) for guaranteed structured output.
+## Errors
 
-## `openai` — OpenAI API + any compatible
-
-Same OpenAICompatProvider that handles LM Studio — just
-different defaults. Pricing baked in for `gpt-4o-mini`,
-`gpt-4o`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`, `o3-mini`.
-
-```
-Base URL:  https://api.openai.com/v1  (default)
-Model:     gpt-4o-mini
-API key:   sk-…  (encrypted at rest)
-```
-
-Compatible with: Azure OpenAI (set base_url), Together, Groq,
-Fireworks, vLLM, Anyscale, Novita, and most domestic-Chinese
-gateways that re-export the OpenAI shape.
-
-## `integration` — your local service
-
-The "opendray CLI as summarizer" path. ANY service that speaks
-the documented `/summarize` protocol can act as a summarizer
-backend. You write the service in any language; opendray
-forwards transcript chunks to it via reverse proxy.
-
-Protocol (the integration must implement):
-
-```
-POST <base_url>/summarize
-  body:    {"messages":[{"role","text","timestamp"}, ...],
-            "scope": "session|project|global",
-            "scope_key": "<cwd or session id or 'operator'>"}
-  reply:   {"facts":[{"text","category","confidence"}, ...],
-            "input_tokens": N,    (optional)
-            "output_tokens": M}   (optional)
-```
-
-Setup:
-1. Run a service somewhere (localhost, in-LAN, in your LXC) that
-   POST handles `/summarize` per the protocol.
-2. Register that service as an opendray integration with the
-   `memory:summarize` scope.
-3. Create a summarizer provider with `kind: integration`,
-   referencing your integration's id.
-4. Optional: provide an outbound bearer token (encrypted at rest)
-   if your service requires auth.
-
-This unlocks every imaginable backend: rule-based extractors,
-self-hosted Llama clusters, internal LLM gateways, even
-distillation services that hand off to a smarter model.
-
-## `is_default` flag
-
-Exactly one provider may be marked default. When a capture rule
-doesn't pin a specific provider, the default is used. Marking a
-new provider as default automatically clears the flag from any
-other row (transactional).
+| code | http | cause | fix |
+|---|---|---|---|
+| `summarizer_unavailable` | 503 | provider service down | check Settings → Test summarizer |
+| `summarizer_quota_exceeded` | 429 | API quota hit | switch provider or wait |
+| `summarizer_model_not_found` | 404 | model name typo | check `model` field |

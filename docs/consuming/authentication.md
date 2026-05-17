@@ -1,77 +1,65 @@
+---
+kind: capability
+title: Authentication
+tldr: Bearer token in Authorization header. Two kinds — admin (od_admin_xxx) and integration (od_live_xxx). 401 codes — unauthenticated / key_revoked / key_expired. 403 — insufficient_scope.
+status: stable
+since: v0.1.0
+topic: consuming
+related: [consuming/overview, consuming/scopes, integrations/auth-model]
+capability: [bearer-token, scope-enforcement]
+inbound: http
+outbound: api
+x-implementation: [internal/auth/]
+---
+
 # Authentication
 
-opendray accepts **Bearer tokens** of two kinds on every protected
-endpoint. The middleware checks them in this order:
+> **tldr:** Bearer token in `Authorization` header. Two kinds — admin (`od_admin_xxx`) and integration (`od_live_xxx`). 401 codes — `unauthenticated` / `key_revoked` / `key_expired`. 403 — `insufficient_scope`.
 
-1. **Admin token** — issued by `POST /api/v1/auth/login`. Full
-   access to every endpoint. Lifetime configured by
-   `[admin].token_ttl` in `config.toml` (default 24h, empty = no
-   expiry). Used by the web UI and by your one-off setup scripts.
-2. **Integration API key** — minted by `POST /api/v1/integrations`,
-   plaintext shown **once**. Scoped to the integration's allowed
-   API surface. No lifetime — they live until rotated or deleted.
+## Token format
 
-Both go in the `Authorization` header:
+| Token | Format | Where |
+|---|---|---|
+| Admin bearer | `od_admin_<base64>` | Settings → Admin tokens |
+| Integration key | `od_live_<base64>` | Integrations → register; one-time-reveal |
 
-```
-Authorization: Bearer <token>
-```
+Both go in `Authorization: Bearer <token>`.
 
-For browser WebSockets that can't add headers, opendray also
-accepts `?token=<token>` query parameter on the WS upgrade request.
+## How auth works per request
 
-## How identity is resolved
-
-```
-HTTP request lands  →  CombinedMiddleware (admin first, integration
-                       fallback) → resolves Principal:
-                       { kind: admin | integration, id, scopes }
-                                  ↓
-                       per-endpoint scope check (if integration)
-                                  ↓
-                       handler runs; integration_id flows into the
-                       call log (see Activity → Call log)
-```
-
-For integrations specifically: the gateway iterates every enabled
-integration's `api_key_hash`, bcrypt-comparing against the bearer.
-First match wins. After the first match a tiny in-memory cache
-maps plaintext → integration_id so subsequent requests skip
-bcrypt; this cache is cleared on rotate.
-
-## Where to store your API key
-
-| Environment | Recommended store |
+| # | Step |
 |---|---|
-| Local CLI tool | `~/.config/<your-app>/credentials` (mode 0600) |
-| macOS desktop app | Keychain (`security` CLI, `node-keytar`) |
-| Linux desktop app | libsecret / GNOME Keyring |
-| Linux daemon | systemd `LoadCredential=` or file mode 0600 |
-| Server / container | AWS Secrets Manager, GCP Secret Manager, Vault |
-| CI / CD | encrypted env var (GitHub Actions secrets etc.) |
+| 1 | Extract `Authorization` header → split on space |
+| 2 | Reject if scheme != `Bearer` or token missing → 401 `unauthenticated` |
+| 3 | Look up token: revoked? expired? → 401 `key_revoked` / `key_expired` |
+| 4 | Route's required scope from OpenAPI `x-required-scope` |
+| 5 | Match against token's declared scopes → 403 `insufficient_scope` if mismatch |
+| 6 | Inject `X-Integration-ID` (proxy routes) |
+| 7 | Forward to handler |
 
-The reference [demo-client](#consuming-typescript-sdk) uses a flat
-JSON file (`.demo-state.json`, mode 0600, gitignored) because it's
-a single-machine learning example. Don't ship that into production.
+## Token lifecycle
 
-## Authorization failures
-
-| Status | Meaning |
+| Event | Behaviour |
 |---|---|
-| `401 unauthorized` | Bearer missing, malformed, or no integration's hash matches. |
-| `401` (after a working call) | Key was rotated server-side. Recover by getting a fresh key (see [Key rotation](#consuming-key-rotation)). |
-| `403 forbidden` | Authenticated but the integration's scopes don't include this endpoint. |
-| `503 service unavailable` | The integration row is disabled or `health_status=unhealthy` (proxy mode only). |
+| Mint | one-time-reveal on the API response and Integrations card; never shown again |
+| Use | every request |
+| Rotate | issues successor token; old has 24h grace period |
+| Revoke | immediate; `key_revoked` returned thereafter |
+| Expire | optional `expires_at`; `key_expired` returned after |
 
-The failing JSON body always has `{"error": "<reason>"}` so you can
-log the underlying cause without parsing prose.
+## Storage on your side
 
-## CORS + browser callers
+| Right | Wrong |
+|---|---|
+| process env or secret manager (Vault / AWS Secrets / 1Password CLI) | committing to source |
+| per-environment (dev / staging / prod) | one global key for everything |
+| rotated 90 days | never rotated |
 
-opendray's `CheckOrigin` is permissive — every origin is allowed
-on the WebSocket upgrade. The HTTP server doesn't add CORS headers
-either (no `Access-Control-Allow-Origin`), so calling directly
-from a browser at a different origin will fail preflight unless
-you put a reverse proxy in front. For now: only call opendray
-from the **same origin** the admin UI is served from, or from a
-server-side runtime.
+## Errors
+
+| code | http | meaning |
+|---|---|---|
+| `unauthenticated` | 401 | missing `Authorization` or bad shape |
+| `key_revoked` | 401 | key was rotated / deleted server-side |
+| `key_expired` | 401 | past `expires_at` |
+| `insufficient_scope` | 403 | route needs scope not in key |

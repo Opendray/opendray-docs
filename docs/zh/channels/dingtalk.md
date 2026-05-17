@@ -1,71 +1,116 @@
-# DingTalk(钉钉)
+---
+kind: capability
+title: 钉钉 DingTalk
+tldr: 钉钉群加自定义群机器人 → 保存 webhook URL + SEC 签名密钥 → Channels → New → kind=dingtalk 粘进去。仅出站 — 没入站回复,没回调按钮。
+status: stable
+since: v0.1.0
+topic: channels
+related:
+  - channels/overview
+  - channels/feishu
+  - channels/notifications
+capability:
+  - text
+  - markdown-card
+  - action-card
+  - url-buttons
+inbound: none
+outbound: group-robot
+public-url-required: false
+setup-time-minutes: 3
+x-implementation:
+  - internal/channel/dingtalk/
+---
 
-**模式:** 自定义群机器人(仅出站)
-**能力:** text · card (markdown / actionCard) — 无回调按钮
-**配置时间:** 约 3 分钟
+# 钉钉 DingTalk
 
-DingTalk 的群机器人是把通知推送到 chat 的最简单方式。它是仅出站的 — 无入站、无能触发回调的按钮 — 但搭配 *Notify on session.idle* + *Once per session* 模式做 "活儿干完时告诉我" 提醒效果很好。
+> **tldr:** 钉钉群加自定义群机器人 → 保存 webhook URL + `SEC...` 签名密钥 → **Channels → New → kind=dingtalk** 粘进去。仅出站 —— 没入站回复,没回调按钮。
 
-## 什么时候用 DingTalk 而非其它中国平台
+## 什么场景用
 
-| 需求 | 用 |
+| 你需要 | 用 |
 |---|---|
-| 只通知,不回复 | DingTalk 群机器人 |
-| 回复 / 交互按钮 | 飞书或 bridge |
+| 只要通知,不要回复 | 钉钉群机器人 ✓ |
+| 要回复 / 交互式回调 | 飞书(v1)或 bridge 适配器 |
 
-## 1. 给群组添加自定义机器人
+## Setup
 
-1. 打开目标 DingTalk 群组 → ⋯ → **群设置** → **群机器人** → **添加机器人**。
-2. 选 **自定义(自定义)**。
-3. 命名(例如 `OpenDray`)。
-4. **安全设置** — 至少选一项。强烈推荐 **加签(加签)**:
-   - DingTalk 生成一个 `SEC...` secret。
-   - opendray 自动在每次 webhook 调用上附加 `&timestamp=...&sign=...`,这样 DingTalk 才接受。
-5. 点 **完成**。DingTalk 显示 **Webhook URL**:
-   ```
-   https://oapi.dingtalk.com/robot/send?access_token=abc123...
-   ```
+| # | 操作 | 在哪做 |
+|---|---|---|
+| 1 | 钉钉群 → ⋯ → **群设置** → **群机器人** → **添加机器人** | 钉钉客户端 |
+| 2 | 选 **自定义** → 命名(`OpenDray`) | 钉钉客户端 |
+| 3 | **安全设置** → 选 **加签**(推荐) → 保存 `SEC...` 密钥 | 钉钉客户端 |
+| 4 | 点 **完成** → 复制 webhook URL(`https://oapi.dingtalk.com/robot/send?access_token=...`) | 钉钉客户端 |
+| 5 | opendray **Channels → New → kind=dingtalk** → 粘 webhook + 签名密钥 → Save | opendray 后台 |
 
-![DingTalk robot create](/tutorial/dingtalk-robot-create.png)
+## Config schema
 
-其它安全选项:
+```yaml
+kind: dingtalk                              # 字面量,必填
+webhook_url: "https://oapi.dingtalk.com/robot/send?access_token=..."  # 必填
+sign_secret: "SEC..."                       # 选 '加签' 模式时必填
+                                            # opendray 自动追加 &timestamp=...&sign=...
+notify:
+  started:          false
+  idle:             true
+  ended:            true
+  permission_ask:   true
+repeat_policy: once-per-session             # 重要 — 钉钉 20/min 限流
+snippet:
+  enabled:    false
+  max_lines:  10
+enabled: true
+```
 
-- **自定义关键词(关键词)** — 每条消息必须包含一个固定子串,否则 DingTalk 丢弃。不太方便(每条通知都要带关键词)。
-- **IP 白名单** — 按源 IP 限制。当 opendray 跑在固定 egress IP 上时有用。
+## Capabilities
 
-## 2. 在 opendray 中配置
+| 能力 | 支持 | 实现备注 |
+|---|---|---|
+| 出站 markdown | ✓ | `msgtype: markdown` |
+| 出站 actionCard | ✓ | 卡片有 URL 按钮时启用 |
+| URL 按钮 | ✓ | `actionCard.btns[].actionURL` |
+| 回调按钮 | ✗ | 群机器人不能触发回调,`cmd:` 值被丢弃 |
+| 加签模式(HMAC) | ✓ | 自动追加 `timestamp` + `sign` |
+| 关键词模式 | ◐ | 每条消息含关键词才生效 |
+| IP 白名单模式 | ◐ | opendray 出口 IP 固定时可用 |
+| 入站回复 | ✗ | 未实现,需要 App Platform 配置 |
 
-Channels → **New channel** → kind **DingTalk(钉钉)**。
+## Errors
 
-| 字段 | 值 |
-|---|---|
-| **Webhook URL** | 来自步骤 1 |
-| **Sign secret** | `SEC...` 值(仅当 DingTalk 选了 *加签* 模式时) |
+| code | http | 原因 | 修复 |
+|---|---|---|---|
+| `dingtalk_invalid_webhook` | 400 | URL 错或缺 `access_token` | 群设置 → 机器人 重新拷贝 |
+| `dingtalk_signature_required` | 401 | 服务端拒绝无签调用 | 设 `sign_secret`(钉钉里选加签模式) |
+| `dingtalk_signature_mismatch` | 401 | 时钟漂移 > 1h 或密钥错 | NTP 同步主机;重拷贝 `SEC...` |
+| `dingtalk_keyword_missing` | 400 | 关键词模式但消息不含关键词 | 消息加关键词或切加签 |
+| `dingtalk_rate_limited` | 429 | 单机器人 > 20 msg/min | 开 `repeat_policy: once-per-session` |
+| `dingtalk_payload_too_large` | 413 | > 20 KB | 调小 `snippet.max_lines` |
 
-保存,**Enabled = on**。
+## Limitations
 
-## 3. 验证
+| 限制 | 数值 | 备注 |
+|---|---|---|
+| 方向 | 仅出站 | 双向需要 App Platform 配置,未实现 |
+| 限流 | 20 msg/min / 机器人 | `repeat_policy: once-per-session` 足以应对 |
+| Payload | ~20 KB | 比 Telegram 4096 字符紧;自动分块 |
+| 签名时间戳容差 | ±1 小时 | 主机时钟需要大致 NTP 同步 |
+| 回调按钮 | 不支持 | 只渲染 URL 按钮 |
 
-- 点卡片上的 **Test** → 群组里出现纯文本消息。
-- 触发 session.idle 事件(让会话空闲 30 秒) → 一个带标题 + markdown body 的 *actionCard* 出现。值是可点击 URL 的按钮渲染为按钮;`cmd:` 回调被静默丢弃,因为群机器人不能触发回调。
+<details>
+<summary>📖 叙事说明</summary>
 
-## 卡片渲染
+钉钉群机器人是推通知到聊天最简单的方式。仅出站 —— 没入站、没回调
+按钮 —— 但跟 *session.idle* + *Once per session* 模式配合,做"活儿
+完了告诉我"的提醒挺合适。
 
-opendray 的 Card → DingTalk 消息:
+其他安全选项(除了加签):
 
-| 卡片元素 | DingTalk |
-|---|---|
-| `CardHeader.Title` | actionCard `title` |
-| `CardMarkdown` | actionCard `text`(markdown) |
-| 带 URL 值的 `CardActions` | actionCard `btns`(每个带 `actionURL`) |
-| 带 `cmd:` 值的 `CardActions` | 丢弃 |
-| `CardDivider` / `CardNote` | 内联 markdown `---` / `> blockquote` |
+- **关键词**:每条消息必须包含固定子串,否则钉钉丢弃。不方便(每条
+  通知都要带关键词)。
+- **IP 白名单**:按源 IP 限制。opendray 跑在固定出口 IP 时有用。
 
-当卡片没有 URL 按钮时,opendray 降级到普通 `markdown` 消息而非 `actionCard`。
+要做双向钉钉需要 App Platform 配置(corp_id + agent_id + secret +
+AES 加密回调 URL),目前未实现。如果一定要双向,用 `bridge` channel
++ 自己用 Python 写个适配器接 App Platform SDK。
 
-## 限制
-
-- **仅出站。** 要接收回复需要 app-platform 配置(corp_id + agent_id + secret + AES 加密的回调 URL),目前尚未实现。要双向 DingTalk 用 bridge 频道 + 你自己写一个针对 App Platform SDK 的 Python adapter。
-- **速率限制:** 每个机器人 20 条消息/分钟。在繁忙会话上突发通知会触发 — *Once per session* 模式的默认值会让你远在限制之下。
-- **载荷大小:** 约 20 KB。长的 Claude 回复仍会客户端分块,但比 Telegram 的 4 KB 更贴近上限。
-- **加签时间戳容差:** ±1 小时。主机时钟必须大致 NTP 同步。
+</details>

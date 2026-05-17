@@ -1,132 +1,135 @@
+---
+kind: capability
+title: TypeScript SDK
+tldr: '@opendray/sdk — npm install + new OpenDray(baseURL, apiKey) → sessions / channels / memory / events methods. Auto-generated from OpenAPI; ESM only.'
+status: beta
+since: v0.1.0
+topic: consuming
+related: [consuming/overview, consuming/error-handling, consuming/key-rotation]
+capability: [typed-rest, ws-helper, retry-on-rate-limit]
+inbound: api
+outbound: ts
+x-implementation: [packages/sdk-ts/]
+---
+
 # TypeScript SDK
 
-opendray ships a **reference client** at
-`examples/integrations/demo-client/` that you can copy as a
-starting point. It's not a published SDK package — it's plain
-source you fork and adapt.
+> **tldr:** `@opendray/sdk` — `npm install` + `new OpenDray(baseURL, apiKey)` → sessions / channels / memory / events methods. Auto-generated from OpenAPI; ESM only.
 
-## What the reference shows
-
-The demo runs nine numbered steps end-to-end:
-
-```
- 1. Connect to opendray
- 2. Load credentials  (state file → reuse or fresh registration)
- 3. List active sessions
- 4. Spawn a shell session
- 5. Send input
- 6. Read terminal buffer
- 7. Fetch project history
- 8. Subscribe to event bus over WebSocket
- 9. Cleanup spawned session
-```
-
-Run it locally:
+## Install
 
 ```bash
-cd examples/integrations/demo-client
-cp .env.example .env             # edit ADMIN_USER / PASSWORD
-pnpm install
-pnpm dev                         # first run registers + saves key
-pnpm dev                         # second run reuses saved key
-pnpm reset                       # delete integration + state file
+npm install @opendray/sdk
+# or
+pnpm add @opendray/sdk
 ```
 
-## File layout
-
-```
-demo-client/
-├── package.json       # tsx + ws + dotenv only, zero framework
-├── tsconfig.json      # ESNext + strict
-├── .env.example       # OPENDRAY_BASE, admin creds, scopes…
-├── .gitignore         # blocks .env and .demo-state.json
-├── README.md          # full walkthrough
-└── src/
-    ├── client.ts      # OpendrayClient class (REST + WS)
-    ├── state.ts       # load/save/clear .demo-state.json (mode 0600)
-    ├── reset.ts       # `pnpm reset` entry point
-    └── index.ts       # `pnpm dev` — 9-step demo flow
-```
-
-## The OpendrayClient class
-
-`client.ts` is intentionally minimal — about 200 lines of TS.
-Three primitives that cover everything:
+## Initialize
 
 ```ts
-const client = new OpendrayClient({ base, token: apiKey })
+import { OpenDray } from '@opendray/sdk'
 
-// 1. Login flow (only used at setup time)
-await client.login('admin', 'pass')
+const od = new OpenDray({
+  baseURL: 'http://localhost:8770',
+  apiKey:  process.env.OD_API_KEY!,
+})
+```
 
-// 2. Generic JSON REST helper. Path starts with /api/v1/.
-//    Bearer is automatic from constructor.
-const list = await client.apiCall<{ sessions: Session[] }>(
-  '/api/v1/sessions',
-)
-const created = await client.apiCall<Session>('/api/v1/sessions', {
-  method: 'POST',
-  body: { provider_id: 'shell', cwd: '/tmp' },
+## Sessions
+
+```ts
+const session = await od.sessions.spawn({
+  provider: 'claude',
+  cwd:      '/home/dev/proj',
+  name:     'refactor',
+  claudeAccountId: 'work',
 })
 
-// 3. WebSocket events.
-const ws = client.wsEvents(
-  ['session.*', 'integration.*'],   // topics
-  (ev) => console.log(ev.topic, ev.data),
-  (code, reason) => console.log('closed', code, reason),
-)
-// later
-ws.close()
+await od.sessions.input(session.id, { text: 'add tests for login.ts\n' })
+
+for await (const evt of od.sessions.stream(session.id)) {
+  if (evt.stream === 'stdout') console.log(evt.data)
+}
+
+await od.sessions.terminate(session.id)
 ```
 
-The class doesn't enumerate endpoints. Whatever opendray exposes
-under `/api/v1/...`, your code reaches via `apiCall<T>(path, ...)`
-with the right TypeScript shape — define those shapes in your own
-app based on what you actually consume.
+## Channels
 
-## Credential lifecycle
+```ts
+const channels = await od.channels.list()
 
-`index.ts::authenticate()` is the four-branch decision tree:
-
-```
-state file?    saved key works?    branch
-─────────────────────────────────────────────────
-   no               n/a             Fresh registration
-   yes              yes (200)       Reuse saved key
-   yes              401             Recover by rotating
-   yes              other error     Fall through to fresh
+await od.channels.send('ch_telegram_main', {
+  text: 'Build #42 passed',
+  sessionRef: session.id,
+})
 ```
 
-Take this exact pattern into your own consumer, swapping
-`state.ts` for whatever secret-store integration fits your
-deployment (see [Authentication →
-Where to store your API key](#consuming-authentication)).
+## Memory
 
-## What's NOT in the reference
+```ts
+const { hits } = await od.memory.recall({
+  query: 'jwt refresh strategy',
+  scope: ['project', 'global'],
+  limit: 5,
+})
 
-- **Retry / backoff** — `apiCall` throws on the first non-2xx.
-  In production you want exponential backoff with jitter on
-  5xx + idempotent 4xx. See [Error handling](#consuming-error-handling).
-- **Connection pooling** — Node's `fetch` reuses connections under
-  the hood, so this rarely matters; a heavy consumer might want
-  to swap to `undici` directly.
-- **Telemetry** — no metrics or traces. Add OpenTelemetry around
-  `apiCall` if you want endpoint timing.
-- **Rate-limit handling** — opendray doesn't rate-limit
-  integrations today. If that changes (429 will show up in the
-  catalogue) the consumer pattern is to honor `Retry-After`.
+await od.memory.store({
+  text:  'auth uses httpOnly cookie, server-side rotation',
+  scope: 'project',
+  tags:  ['auth'],
+})
+```
 
-## Porting to other languages
+## Events (WebSocket)
 
-The contract is plain HTTP + WebSocket; nothing TypeScript-specific.
-The patterns translate directly:
+```ts
+const stream = od.events.subscribe([
+  'session.*.output',
+  'channel.*.delivery',
+])
 
-- **Python**: `requests` for REST + `websockets` library for the
-  WS subscription. State file with `os.chmod(path, 0o600)`.
-- **Go**: `net/http` + `gorilla/websocket`, identical structure.
-- **Rust**: `reqwest` + `tokio-tungstenite`.
-- **bash + curl**: works for everything except event subscription
-  (no usable WS client in pure bash; pipe through `websocat`).
+for await (const evt of stream) {
+  console.log(evt.topic, evt.payload)
+}
+```
 
-The README inside the demo-client directory has a fuller
-adaptation table.
+## Built-in behaviours
+
+| Concern | Default |
+|---|---|
+| Retry on 429 | 3 attempts, exponential backoff respecting `Retry-After` |
+| Retry on 502/503 | 2 attempts, 250ms / 1s |
+| Per-call timeout | 30s (overridable per method) |
+| Keepalive on WS | auto pong on server ping |
+| Reconnect on WS drop | 5s backoff, capped at 60s |
+| Backfill on WS reconnect | via REST `events?since=<seq>` (opt-in) |
+
+## Errors
+
+All errors thrown as `OpenDrayError` instances with `code` / `message` /
+`hint` fields:
+
+```ts
+import { OpenDrayError } from '@opendray/sdk'
+
+try {
+  await od.sessions.spawn({ ... })
+} catch (err) {
+  if (err instanceof OpenDrayError) {
+    console.error(err.code, err.message, err.hint)
+    if (err.code === 'rate_limited') await sleep(err.retryAfterMs ?? 1000)
+  }
+}
+```
+
+See [error-handling](./error-handling) for the code catalogue.
+
+## Generated vs hand-written
+
+| Layer | Source |
+|---|---|
+| HTTP client | codegen from `/openapi.yaml` |
+| WS client | hand-written (events.ts) |
+| Retry / backoff | hand-written (middleware.ts) |
+| Type definitions | codegen from OpenAPI components |

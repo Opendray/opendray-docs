@@ -1,18 +1,25 @@
+---
+kind: concept
+title: Inspector panel
+tldr: Right-side collapsible panel with 7 sub-tabs (Files / Git / Search / Tasks / History / Notes / Memory). All scoped to the session's cwd. Resizable 320–900px, persisted per-user.
+status: stable
+since: v0.1.0
+topic: sessions
+related:
+  - sessions/overview
+  - sessions/git-workflow
+  - notes/overview
+references:
+  capabilities: [sessions]
+x-implementation:
+  - app/web/src/features/inspector/
+---
+
 # Inspector panel
 
-The Inspector is the collapsible right-side panel on the Sessions
-page. It carries metadata, file browsing, history, and tooling
-that doesn't fit inline in the terminal.
+> **tldr:** Right-side collapsible panel with 7 sub-tabs (Files / Git / Search / Tasks / History / Notes / Memory). All scoped to the session's `cwd`. Resizable 320–900px, persisted per-user.
 
-![Inspector panel tabs](/tutorial/sessions-inspector.png)
-
-Toggle the panel with the inspector-toggle icon in the top-right
-of the WorkbenchHeader (next to the session controls). The open
-state persists per-user across reloads.
-
-## Sub-tabs
-
-The Inspector exposes seven tabs in a 3-row grid (4 + 2 + 1):
+## Sub-tabs (3-row grid 4 + 2 + 1)
 
 | Row | Tabs |
 |---|---|
@@ -20,122 +27,113 @@ The Inspector exposes seven tabs in a 3-row grid (4 + 2 + 1):
 | 2 | History · Notes |
 | 3 | Memory |
 
-All tabs scope to the **session's `cwd`** — there's nothing
-showing data outside that working directory.
+## Tab reference
 
 ### Files
 
-A scrollable tree of the session's working directory. Helpful
-when you've forgotten what files are in the project, or when
-the agent references a file you want to peek at without leaving
-the terminal.
-
-Click a file → opens a read-only viewer in the Inspector.
-
-The tree is collapsed by default to 3 levels deep so
-`node_modules` or `.venv` doesn't blow it up; expand specific
-subtrees on demand.
+| Property | Value |
+|---|---|
+| Source | scrollable tree of session's `cwd` |
+| Click file | opens read-only viewer in Inspector |
+| Default collapse depth | 3 levels (so `node_modules` / `.venv` don't blow up) |
+| Filter | none — use Search tab for content |
 
 ### Git
 
-A full Git workbench for the cwd: branch switching, staging,
-commits, push, and the in-panel pull-request command center.
-Only shown when the cwd is inside a git repo. See
-[Git workflow](#02-sessions-07-git-workflow) for the full tour.
+| Property | Value |
+|---|---|
+| Source | cwd, when inside a git repo |
+| Visible when | cwd is a git repo |
+| Capabilities | branch switch / stage / commit / push / PR control panel |
+| See | [Git workflow](./git-workflow) |
 
 ### Search
 
-Substring + regex search across the cwd. Powered by the same
-ripgrep wrapper the FS handler uses on the backend, so it
-respects `.gitignore` and skips `node_modules`. Match results
-link to the file viewer.
+| Property | Value |
+|---|---|
+| Backend | ripgrep wrapper (same as FS handler) |
+| Honours | `.gitignore`, skips `node_modules` |
+| Modes | substring + regex |
+| Click match | opens file viewer at line |
 
 ### Tasks
 
-The session-scoped Custom Tasks runner. Every task you've saved
-under Plugins → Custom Tasks shows up here as a one-click
-launcher; the run spawns a **new** session in the same cwd
-under the parent session, so `g s` shows them grouped.
+| Property | Value |
+|---|---|
+| Source | tasks saved under Plugins → Custom Tasks |
+| Trigger | one-click → spawns new session under parent |
+| Grouping | shows under parent in `g s` (group sessions view) |
 
-### History
+### History (project-level)
 
-**Project-level** input log: every prompt the operator has sent
-in this cwd, pooled across every session ever spawned there.
-
-Source of truth varies by provider:
+Input log of every prompt sent in this `cwd`, pooled across every
+session ever spawned there.
 
 | Provider | Reads from |
 |---|---|
-| Claude | `~/.claude/projects/<encoded-cwd>/*.jsonl` and `~/.claude-accounts/*/projects/...` |
-| Codex | `~/.codex/sessions/**/*.jsonl` filtered by `session_meta.cwd` |
-| Gemini | `~/.gemini/tmp/<dir>/logs.json` (resolved via `projects.json` short-name) |
+| `claude` | `~/.claude/projects/<encoded-cwd>/*.jsonl` + `~/.claude-accounts/*/projects/...` |
+| `codex` | `~/.codex/sessions/**/*.jsonl` filtered by `session_meta.cwd` |
+| `gemini` | `~/.gemini/tmp/<dir>/logs.json` (resolved via `projects.json`) |
+| `shell` / other | empty state |
 
-These paths are configurable in **Settings → Server → Storage
-paths** (one section per provider). For non-supported providers
-(shell, etc.) the panel shows a friendly empty state.
+Paths configurable in **Settings → Server → Storage paths**.
 
-Each row carries:
+| Per-row data | Per-row action |
+|---|---|
+| Timestamp (relative) | 📋 Copy prompt text |
+| Prompt text (wrapped, never truncated) | ➤ Resend → re-injects into currently-active session via `/input` (uses `\r`) |
+| CLI session id (8-char prefix; full on hover) | |
 
-- Timestamp (relative — "2 hours ago")
-- The prompt text (wrapped, never truncated)
-- The CLI session id (8-char prefix; full id on hover)
-
-Per-row actions appear on hover:
-
-- **📋 Copy** — prompt text to clipboard.
-- **➤ Resend** — re-injects the prompt into the **currently
-  active** session via the same `/input` endpoint the terminal
-  uses. Uses `\r` (raw-mode Enter), not `\n`, so Claude doesn't
-  see a literal newline in the prompt.
-
-Newest entries first. Filter box at the top is case-insensitive
-substring match against prompt text. Polls every 10 s so newly
-typed prompts show up automatically.
+Polls every 10s; filter box is case-insensitive substring.
 
 ### Notes
 
-The session's linked Obsidian note. Each session gets one note
-at `<vault-root>/sessions/<session-id>.md` automatically. The
-Inspector embeds the same Markdown editor you'd see on the
-Notes page:
+Each session has a linked Obsidian note at
+`<vault-root>/sessions/<session-id>.md`.
 
-- **Source / Preview** tabs at the top of the note pane — pick
-  whichever matches the moment.
-- **Wiki-link suggestions** trigger when you type `[[`.
-- **Backlinks** show on the right (other notes that link to
-  this one).
-- **Auto-save** debounced 1 s after the last keystroke.
+| Feature | Behaviour |
+|---|---|
+| Editor | same as Notes page (Source / Preview tabs) |
+| `[[` trigger | wiki-link suggestions |
+| Backlinks | right pane shows notes linking here |
+| Auto-save | debounced 1s after last keystroke |
+| Lifetime | file-based; survives session restart |
 
-This is the right place for the operator's running scratchpad:
-"things to ask Claude about", "pending decisions", "TODO before
-ending the session". Survives session restart because it's
-file-based, not in-memory.
+### Memory
 
-## What's NOT in the Inspector
+Per-session view of pgvector memory hits, capture rules in effect,
+worker status. See [Memory](../memory/overview).
 
-- **Lifecycle event timeline** — the per-session "what happened
-  when" view used to live here as an "Activity" tab. It was
-  removed in favour of History because raw event streams turned
-  out to be low-signal for vibe-coding. The system-wide event
-  bus is still available on the **Activity** page (top nav).
-- **Outline** of the latest assistant message — also previously
-  here, since dropped. Use Search instead, or the agent's own
-  scrollback.
+## What's NOT here
 
-## Sizing and hiding
+| Removed | Why |
+|---|---|
+| Lifecycle event timeline ("Activity" tab) | low-signal for vibe-coding; use top-nav **Activity** page for the system-wide event bus |
+| Outline of latest assistant message | dropped; use Search or agent scrollback |
 
-The panel anchors to the right edge of the workbench and is
-**user-resizable**:
+## Sizing & hiding
 
-- **Drag the left edge** to resize. A 6-pixel column on the
-  inspector's left edge highlights on hover; press and drag to
-  any width between **320 px** (default) and **900 px**.
-- **Double-click** the same edge to snap back to the default
-  width.
-- The width is persisted per-user (zustand `opendray.layout` in
-  `localStorage`), so it survives reloads and re-spawned
-  sessions.
+| Action | Effect |
+|---|---|
+| Drag left-edge column | resize 320–900px |
+| Double-click left edge | snap back to default 320px |
+| Toggle icon in WorkbenchHeader | hide / show panel |
+| Persisted | zustand `opendray.layout` in `localStorage` per-user |
 
-To hide the panel entirely, click the inspector-toggle icon in
-the WorkbenchHeader. The open/closed state is persisted the same
-way.
+![Inspector panel tabs](/tutorial/sessions-inspector.png)
+
+<details>
+<summary>📖 Narrative explanation</summary>
+
+The Inspector exists for metadata, file browsing, history, and
+tooling that doesn't fit inline in the terminal. All seven tabs
+scope strictly to the session's `cwd` — there's no view of data
+outside the working directory.
+
+The Notes tab is the right place for an operator's running
+scratchpad: "things to ask Claude about", "pending decisions",
+"TODO before ending the session". It survives session restart
+because it's file-based, not in-memory — and because it's just
+another Obsidian note, it appears in your full vault graph too.
+
+</details>

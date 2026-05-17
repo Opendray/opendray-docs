@@ -1,142 +1,168 @@
+---
+kind: endpoint
+title: Git 工作流
+tldr: Inspector Git tab = 自包含 PR 命令中心。切分支 / 暂存 / commit / push / PR 创建 / 合并 / check 状态 — 全程不离开 opendray。端点在 /api/v1/git/。
+status: stable
+since: v0.1.0
+topic: sessions
+related:
+  - sessions/inspector
+  - sessions/mobile-git
+  - plugins/git-hosts
+operations:
+  - operationId: gitStatus
+    method: GET
+    path: /api/v1/git/status
+    summary: Working tree + branch summary
+    tags: [git]
+    x-required-scope: session:read
+  - operationId: gitCheckout
+    method: POST
+    path: /api/v1/git/write/checkout
+    summary: Switch branch (optional auto-stash)
+    tags: [git]
+    x-required-scope: session:write
+  - operationId: gitCommit
+    method: POST
+    path: /api/v1/git/write/commit
+    summary: Create a commit
+    tags: [git]
+    x-required-scope: session:write
+  - operationId: gitListPRs
+    method: GET
+    path: /api/v1/git/prs
+    summary: List PRs for the cwd's remote
+    tags: [git]
+    x-required-scope: session:read
+x-implementation:
+  - internal/git/
+  - app/web/src/features/inspector/git/
+---
+
 # Git 工作流
 
-Inspector 的 **Git** 标签把会话的工作目录变成一个自包含的 PR 命令中心:切换分支、暂存文件、提交、推送、开 PR、看 CI 检查、合并 — 全程不用离开 opendray。
+> **tldr:** Inspector Git tab = 自包含 PR 命令中心。切分支 / 暂存 / commit / push / PR 创建 / 合并 / check 状态 —— 全程不离开 opendray。端点在 `/api/v1/git/`。
 
-只有当 cwd 位于一个 git 仓库内时这个标签才渲染。如果对目录运行 `git rev-parse` 失败,面板会折叠为简短的 "not a git repo" 提示。
+## tab 何时渲染
+
+| Cwd | 结果 |
+|---|---|
+| 在 git repo 内 | 完整 tab |
+| `git rev-parse` 失败 | "not a git repo" 空状态 |
 
 ## 状态头
 
-标签顶部总结你当前的位置:
-
-- **当前分支**及其上游(例如 `feat/foo → origin/feat/foo`)。当没有跟踪上游时这一行显示 "no upstream" — 下面的 **Push** 按钮在首次推送时会用 `--set-upstream`。
-- **Ahead / behind 计数**相对上游。`+3 / -1` 表示本地有 3 个提交不在远程,远程有 1 个提交不在本地。
-- 工作树摘要 — 已暂存、未暂存、未跟踪文件的数量。数字是可点击的;点击会跳到下方的暂存区。
-
-## 分支控件
-
-状态头下方的条带包含每一个分支操作:
-
-| 元素 | 用途 |
+| 元素 | 来源 |
 |---|---|
-| 分支下拉 | 切换到任意其它本地分支。列表在标签打开时取一次,任何其它分支操作成功后刷新。 |
-| **+ New** | 从当前 HEAD 创建分支并切过去。单输入框模态。 |
-| **Push** | 推送到上游。首次推送(无上游)使用 `--set-upstream`。当 ahead == 0 且已设置上游时禁用。 |
+| 当前分支 + upstream | `git rev-parse --abbrev-ref` + `for-each-ref` |
+| Ahead / behind 计数 | `git rev-list --count` |
+| 工作树摘要 | staged / unstaged / untracked 计数(可点) |
+| "no upstream" 状态 | 首次 Push 用 `--set-upstream` |
 
-### Stash & switch
+## 分支操作
 
-带有未提交改动的树切换分支并不被阻止。如果服务器在 `checkout` 时检测到未提交的改动,响应是 **409 Conflict**,其 body 携带一个 `dirty_files: [...]` 数组。Web UI 捕获后显示一个 Sonner 提示(toast),类似:
+| 元素 | API |
+|---|---|
+| 分支下拉 | `GET /git/write/branches` → 通过 `POST /git/write/checkout` 切换 |
+| **+ New** | `POST /git/write/branches` 创建 + checkout |
+| **Push** | `POST /git/write/push`(首次 `--set-upstream`) |
+| 禁用条件 | ahead == 0 && upstream 已设 |
 
-> Uncommitted changes block switch to `main`
-> &nbsp;&nbsp;`app/foo.ts, internal/bar.go, app/baz.tsx`
-> &nbsp;&nbsp;[ Stash & switch ]
+### Stash & switch(自动恢复)
 
-点击 **Stash & switch** 用 `stash: true` 重试 checkout。服务器先运行 `git stash push --include-untracked -m "opendray-auto: switch to <name>"`,然后执行 checkout,并返回 stash 短引用。成功提示显式显示它,这样恢复就只差一条终端命令:
+| # | 步骤 |
+|---|---|
+| 1 | 脏树 checkout → 服务端返回 **409 Conflict** + `dirty_files: [...]` |
+| 2 | UI 显示 Sonner toast:`Uncommitted changes block switch to <branch>` + `[ Stash & switch ]` |
+| 3 | 点 → 重试 `{ "stash": true }` |
+| 4 | 服务端跑 `git stash push --include-untracked -m "opendray-auto: switch to <name>"` |
+| 5 | checkout 成功 → toast 显示 stash 短 ref:`Switched to main (stashed as abc1234)` |
+| 6 | 之后用 `git stash pop` / `git stash apply` 恢复 |
 
-> Switched to `main` (stashed as `abc1234`)
+## 暂存 + commit
 
-之后用 `git stash pop` 恢复 stash 的工作(如果想保留 stash 用 `git stash apply`)。
+| 单行 | 批量 |
+|---|---|
+| Stage / Unstage(一文件) | Stage all = `git add .` |
+| Diff(只读侧抽屉) | Unstage all = `git reset` |
 
-## 暂存与提交
+Commit 表单:
 
-中间面板列出每一项工作树改动,带 porcelain 状态码(`M`、`A`、`??` 等)。每行操作:
-
-- **Stage** 把未暂存改动移到 index。
-- **Unstage** 是已暂存行的反向操作。
-- **Diff** 在侧边抽屉里打开一个统一 diff(只读)。
-
-批量操作:
-
-- **Stage all** = `git add .`
-- **Unstage all** = `git reset`
-
-提交表单位于文件列表下方:
-
-- 多行**消息**字段。**Cmd / Ctrl + Enter** 提交,无需鼠标移到按钮上。
-- 实时的暂存计数徽章 — 至少有一个文件已暂存之前,**Commit** 按钮禁用。
-- 成功后表单清空,工作树状态刷新,新 HEAD 显示在右侧日志条带。
+| 字段 | 行为 |
+|---|---|
+| Message | 多行;`Cmd/Ctrl + Enter` 提交 |
+| Commit 按钮 | ≥1 文件 staged 才启用;live 计数徽章 |
+| 成功后 | 清空表单;刷新状态;新 HEAD 出现在 log strip |
 
 ## Pull request
 
-提交表单下方是 **PR 命令中心**。GitHub、Gitea、GitLab 用同一个界面 — 网关把 API 差异规范化为同一种形态。
+GitHub / Gitea / GitLab 同一接口 —— gateway 归一化。
 
 ### 列表
 
-默认视图列出当前 remote 的**开放** PR。通过列表上方的胶囊切换到 **Closed** 或 **All**。每行显示:
-
-| 列 | 说明 |
+| 默认 | 当前 remote 的开 PR |
 |---|---|
-| `#NN` | 点击 → 在 host 上新标签打开 PR。 |
-| 标题 | 截断;悬停看完整标题。 |
-| 作者 | 头像 + 用户名。 |
-| 分支 | `head → base`(例如 `feat/foo → main`)。 |
-| 聚合检查 | 彩色胶囊 — `success`、`failure`、`pending`、`mixed`。见下面的 Checks 小节。 |
-
-点击一行**就地展开**显示 Checks 列表和合并表单。
+| 切换 | Open / Closed / All |
+| 每行 | `#NN`(链接)· 标题 · 作者 · `head → base` · 聚合 check 胶囊 |
+| 点行 | 原地展开 → 揭示 Checks + Merge 表单 |
 
 ### 创建
 
-**+ Create PR** 按钮打开一个内嵌表单:
+| 字段 | 默认 |
+|---|---|
+| Title | 最后 commit subject |
+| Body | 多行 |
+| Head | 当前分支(只读) |
+| Base | host 默认分支(API 解析) |
 
-- **Title** — 默认为最后一次提交的主题。
-- **Body** — 多行。
-- **Head** — 当前分支(只读)。
-- **Base** — 默认为 host 的默认分支(`main` / `master` / 仓库配置的任何值)。通过 host API 解析,不是硬编码字符串。可自由覆盖。
-
-提交 → 开 PR,新行展开出现在列表顶部。
+提交 → 创建 PR,新行出现在顶部,展开。
 
 ### 合并
 
-每个展开的 PR 行都有一个合并表单,带标准的 GitHub 合并方法:
+| 方法 | Flag | 何时用 |
+|---|---|---|
+| Merge commit | `--merge` | 保留 merge 历史 |
+| Squash | `--squash` | 一 commit 一 PR(推荐) |
+| Rebase | `--rebase` | 慎用;丢 merge 锚 |
+| Delete branch on merge | 复选框 | 默认 ON |
 
-- **Merge commit** — 默认的 `--merge`。
-- **Squash and merge** — `--squash`。推荐用于本项目使用的 "one-commit-per-PR" 工作流。
-- **Rebase and merge** — `--rebase`。慎用;rebase 丢失合并锚点。
-
-**Delete branch on merge** 是方法切换下方的复选框。默认为**开** — 否则分支累积太快。
-
-### 检查
-
-行展开后,opendray 每 30 秒轮询一次该 PR 的 checks 并以列表展示。词汇规范化到 GitHub 的:
+### Checks(归一化词汇)
 
 | 状态 | 含义 |
 |---|---|
-| `success` | 任务完成且无错误。 |
-| `failure` | 任务运行并失败。 |
-| `pending` | 排队中或进行中。 |
-| `neutral` | 任务完成但没有通过/失败的判断。 |
-| `cancelled` | 完成前被杀。 |
-| `skipped` | 被工作流有条件跳过。 |
+| `success` | 无错完成 |
+| `failure` | 跑了但失败 |
+| `pending` | 排队或运行中 |
+| `neutral` | 完成但无 pass/fail 判定 |
+| `cancelled` | 完成前被杀 |
+| `skipped` | workflow 条件跳过 |
 
-Gitea 和 GitLab 的 commit-status 端点映射到这套词汇,所以你可以用同一个 UI,不必关心是哪个 host 发出了什么。
-
-列表行上的聚合判定是最坏情况的累计:任何 `failure` → `failure`;否则任何 `pending` → `pending`;否则 `success`。悬停徽章看 tooltip 中的分解。
-
-## 出错时
-
-Git 标签把服务器错误以红色 Sonner 提示(toast)显示。常见错误:
-
-- **`fatal: not a git repository`** — cwd 未被跟踪;面板会回到 "not a git repo" 空状态。
-- 推送时 **`Permission denied (publickey)`** — 网关的 Git 凭证对那个 remote 没有写权限。检查 **Settings → Git hosts** 里的 PAT。
-- 删除时 **`branch '<name>' not fully merged`** — git 的安全删除拒绝。提示(toast)会给出一个强制删除确认,升级为 `git branch -D`。
+聚合:任何 `failure` → `failure`;任何 `pending` → `pending`;否则
+`success`。30s polling。
 
 ## 后端路由
 
-要做线级调试,驱动这个标签的端点位于 `/api/v1/git/...`:
-
 | Method | Path | 用途 |
 |---|---|---|
-| GET | `/git/status` | 工作树 + 分支摘要。 |
-| GET | `/git/log` | HEAD 上的最近提交。 |
-| GET | `/git/write/branches` | 所有分支(本地 + 远程引用)。 |
-| POST | `/git/write/branches` | 创建 + 可选 checkout。 |
-| DELETE | `/git/write/branches` | 删除(query:`name`、`force`)。 |
-| POST | `/git/write/checkout` | 切换分支。`stash: true` body 字段自动 stash 有未提交改动的树。 |
-| POST | `/git/write/stage` `/unstage` | Index 操作。 |
-| POST | `/git/write/commit` | 创建一个提交。 |
-| POST | `/git/write/push` | 首次推送时 `--set-upstream`。 |
-| GET | `/git/prs` | 列出 cwd remote 的 PR。 |
-| POST | `/git/prs` | 创建。 |
-| POST | `/git/prs/{n}/merge` | 用方法选项合并。 |
-| GET | `/git/prs/{n}/checks` | 规范化的 check 运行。 |
+| GET | `/git/status` | 工作树 + 分支摘要 |
+| GET | `/git/log` | HEAD 最近 commit |
+| GET | `/git/write/branches` | 所有分支(local + remote ref) |
+| POST | `/git/write/branches` | 创建 + 可选 checkout |
+| DELETE | `/git/write/branches` | 删除(`?name=`、`?force=`) |
+| POST | `/git/write/checkout` | 切分支;`{ "stash": true }` 自动 stash |
+| POST | `/git/write/stage` / `/unstage` | 索引操作 |
+| POST | `/git/write/commit` | 创建 commit |
+| POST | `/git/write/push` | 首次 `--set-upstream` |
+| GET | `/git/prs` | 列 PR |
+| POST | `/git/prs` | 创建 |
+| POST | `/git/prs/{n}/merge` | 合并(带方法选项) |
+| GET | `/git/prs/{n}/checks` | 归一化 check runs |
 
-每个路由都需要鉴权;内嵌的 web 客户端自动把会话 token 接进去。
+## Errors
+
+| 消息 | 原因 | 修复 |
+|---|---|---|
+| `fatal: not a git repository` | cwd 未追踪 | tab 回到 "not a git repo" 空状态 |
+| `Permission denied (publickey)` 在 push | git 凭据无写权限 | 检查 **Settings → Git hosts** 里的 PAT |
+| `branch '<name>' not fully merged` 在删除 | safe-delete 拒绝 | toast 提供 force-delete → `git branch -D` |
+| `409 Conflict` 在 checkout | 脏树 | 用 Stash & switch 按钮 |

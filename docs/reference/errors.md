@@ -1,4 +1,24 @@
+---
+kind: capability
+title: Error codes
+tldr: 'Catalogue of every error code returned by the REST + WS API. Envelope: { error: { code, message, hint, request_id } }. Match on code programmatically.'
+status: stable
+since: v0.1.0
+topic: reference
+related:
+  - reference/overview
+  - reference/rest
+  - consuming/error-handling
+capability:
+  - stable-error-codes
+  - error-envelope
+x-implementation:
+  - internal/gateway/error.go
+---
+
 # Error codes
+
+> **tldr:** Catalogue of every error code returned by the REST + WS API. Envelope `{ error: { code, message, hint, request_id } }`. Match on `code` programmatically.
 
 Every error response from the REST API uses the same envelope:
 

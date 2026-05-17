@@ -1,119 +1,74 @@
-# Quickstart
+---
+kind: concept
+title: Memory — Quickstart
+tldr: Memory is on by default — no flag, no service, no API key. Spawn any session → opendray auto-attaches the memory MCP server → agent can search/store. Verify in Memory page (🧠 sidebar, shortcut g m).
+status: stable
+since: v0.1.0
+topic: memory
+related:
+  - memory/overview
+  - memory/scopes
+  - memory/configuration
+  - memory/troubleshooting
+references:
+  capabilities: [memory]
+x-implementation:
+  - internal/memory/
+---
 
-Memory is **on by default** when you start opendray. There's no
-flag, no extra service, no API key. This section walks through the
-five-minute experience.
+# Memory — Quickstart
 
-## What you don't need to do
+> **tldr:** Memory is on by default — no flag, no service, no API key. Spawn any session → opendray auto-attaches the memory MCP server → agent can search/store. Verify in **Memory** page (🧠 sidebar, shortcut `g m`).
 
-- ❌ Install qdrant or chromadb
-- ❌ Run mem0 as a subprocess
-- ❌ Sign up for OpenAI / Voyage / Cohere
-- ❌ Configure any environment variables
+## What you DON'T need
 
-## Step 1 · Start opendray
+| ✗ Not required |
+|---|
+| Install qdrant / chromadb |
+| Run mem0 as subprocess |
+| OpenAI / Voyage / Cohere account |
+| Any environment variables |
 
-```bash
-go run ./cmd/opendray serve -config config.toml
-```
+## Steps
 
-You should see a log line like:
+| # | Action | Verify |
+|---|---|---|
+| 1 | `go run ./cmd/opendray serve -config config.toml` | log: `INFO memory ready embedder=bm25 dimensions=384` |
+| 2 | Sessions → Spawn → pick provider + cwd | per-session `mcp.json` includes `opendray-memory` |
+| 3 | In a Claude session: `me: my preferred frontend frameworks are vue and react` | Claude calls `memory_store(...)` OR writes `.claude/.../memory/...md` (mirror picks up) |
+| 4 | Open **Memory** page (🧠 sidebar) | Status badge `bm25 · 384-dim · enabled`; search "vue" returns the row |
+| 5 | Spawn Codex in same cwd → `me: what frontend framework do I use?` | Codex calls `memory_search` → gets pnpm/vue fact |
 
-```
-INFO memory ready  embedder=bm25  dimensions=384
-INFO memory MCP auto-attach enabled
-```
-
-If memory init fails (e.g. pgvector extension missing), you'll see
-the error here and the rest of opendray still boots — just without
-memory tools attached to sessions.
-
-## Step 2 · Spawn any session
-
-Open the web UI → Sessions → Spawn → pick Claude/Codex/Gemini and a
-working directory. opendray writes a per-session `mcp.json` that
-includes `opendray-memory` automatically.
-
-You can verify by inspecting the rendered file:
+## Verify mcp.json was rendered
 
 ```bash
 ls /var/folders/.../opendray-sess-<id>/
 cat /var/folders/.../opendray-sess-<id>/claude-mcp.json
+# expect: an "opendray-memory" entry alongside any other MCP servers
 ```
 
-You'll see an `opendray-memory` entry alongside any other MCP
-servers you've registered.
+## Two UI pages, deliberate split
 
-## Step 3 · Tell the agent something to remember
-
-In a Claude session:
-
-```
-me: my preferred frontend frameworks are vue and react
-```
-
-The agent does either:
-
-- **Calls `opendray-memory.memory_store(text)`** — preferred path,
-  installs into the shared store immediately, or
-- Writes `<project>/.claude/.../memory/<topic>.md` — the local-only
-  Claude path. opendray's mirror picks it up on the next session
-  spawn (see [Mirror](#memory-mirror) for details).
-
-Either way, the fact lands in pgvector under
-`scope=project, scope_key=<your cwd>`.
-
-## Step 4 · Verify in the UI
-
-Two pages, deliberately split:
-
-- **Settings → Server → Memory** is the *configuration draft* —
-  embedder choice, ports, dim, restart-required fields. Click
-  **Test embedder** here; toast confirms the active backend is alive.
-- **Memory** (left sidebar 🧠, shortcut `g m`) is the *runtime
-  inspector* — browse, search, edit, delete the actual stored
-  memories.
-
-On the Memory page you should see:
-
-- Status badge: `bm25 · 384-dim · enabled`
-- Inspector lists the memory you just stored
-- Search "vue" or "react" returns the row with similarity > 0
-- Each row shows hit-count once searches have hit it
-
-When you switch embedder backends later (e.g. wire up ollama), a
-yellow Migrate banner appears on this page to reembed older
-memories — see [Maintenance](#memory-maintenance).
-
-## Step 5 · Cross-CLI test
-
-Spawn a Codex session in the **same cwd** and ask:
-
-```
-me: what frontend framework do I usually use?
-```
-
-Codex should call `opendray-memory.memory_search` and get the same
-fact back. That's the cross-CLI value prop, working.
+| Page | Purpose |
+|---|---|
+| **Settings → Server → Memory** | configuration draft — embedder choice, ports, dim, restart-required fields. **Test embedder** here. |
+| **Memory** (sidebar 🧠) | runtime inspector — browse, search, edit, delete actual rows |
 
 ## What's NOT happening
 
-- The agent's response isn't going through opendray; only its tool
-  calls.
-- opendray isn't reading agent stdout for memory; nothing is
-  scraped from the conversation. Only explicit tool calls (or
-  Claude's local memory files via the mirror) end up in pgvector.
-- Other operators on the same opendray instance can't see your
-  memories — `scope_key` is your cwd; if their cwd is different,
-  the rows are invisible.
+| ✗ Not in scope |
+|---|
+| Agent's response goes through opendray (only its tool calls) |
+| Reading stdout for memory (nothing scraped from conversation) |
+| Other operators see your memories (`scope_key` is your cwd; theirs differ) |
 
 ## Troubleshooting at a glance
 
-| Symptom | First thing to check |
+| Symptom | First check |
 |---|---|
-| Agent never calls memory tools | Did you spawn the session AFTER the system-prompt guidance was added? Restart opendray, restart session. |
-| `tool error: 401 unauthorized` | The mcp.json has a stale API key. Restart the session — opendray re-renders mcp.json with the cached key. |
-| Search returns no hits | BM25 only matches exact tokens. Try a query word that literally appears in the stored text. |
-| `connection refused` from mcp-memory | opendray gateway crashed. Check `tail -f /tmp/opendray.log`. |
+| Agent never calls memory tools | spawn after system-prompt was added? restart opendray + session |
+| `tool error: 401 unauthorized` | stale API key in mcp.json — restart session (re-renders) |
+| Search returns no hits | BM25 = exact token match; use a literal word from the stored text |
+| `connection refused` from mcp-memory | gateway crashed — `tail -f /tmp/opendray.log` |
 
-Deep dive: [Troubleshooting](#memory-troubleshooting).
+Deep dive: [Troubleshooting](./troubleshooting).

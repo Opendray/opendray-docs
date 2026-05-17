@@ -1,71 +1,53 @@
-# Keyboard & theme
+---
+kind: capability
+title: Settings — Keyboard & theme
+tldr: Per-user (browser local). Theme — light/dark/system. Keyboard — vim/emacs/none. Persists to localStorage, syncs across tabs.
+status: stable
+since: v0.1.0
+topic: settings
+related: [settings/overview, sessions/tabs]
+capability: [theme-toggle, keyboard-mode, browser-local]
+x-implementation: [app/web/src/features/settings/user/]
+---
 
-Two pure-cosmetic preference panels under
-**Settings → Workspace**. Both persist in browser localStorage
-— no server restart required, no other tab affected on a
-different machine.
+# Settings — Keyboard & theme
+
+> **tldr:** Per-user (browser local). Theme — `light` / `dark` / `system`. Keyboard — `vim` / `emacs` / `none`. Persists to `localStorage`, syncs across tabs.
 
 ## Theme
 
-Settings → **Workspace → Appearance** picker:
-
-- **Dark** — default, matches the rest of the admin design.
-- **Light** — for daylight-monitor use.
-- **System** — follows the OS preference; auto-flips when your
-  OS dark-mode toggles.
-
-The theme persists in localStorage per browser. There's no
-"theme per device" toggle — every browser tab on your account
-shares one.
-
-Custom theme tokens (when you want corporate branding) live
-under `app/web/src/index.css` — change the CSS variables and
-rebuild. opendray doesn't ship a theme editor.
-
-## Font size
-
-Settings → **Workspace → Font size** scales the entire UI
-(titles, body text, icons, terminal characters):
-
-| Preset | Scale |
+| Value | Behaviour |
 |---|---|
-| Compact | 85% |
-| Default | 100% |
-| Comfy | 115% |
-| Large | 130% |
+| `system` (default) | follows OS preference; changes live |
+| `light` | always light |
+| `dark` | always dark |
 
-Use Comfy / Large on a 4K display where Default looks too small;
-Compact when you have a Sessions workbench packed with tabs.
-Persists per browser, same as Theme.
-
-## Keyboard shortcuts
-
-Shortcuts are baked-in (not yet operator-customisable). Below
-is the current bindings table.
-
-![Keyboard shortcuts editor](/tutorial/settings-shortcuts.png)
-
-| Default | Action |
+| Key | localStorage |
 |---|---|
-| `g s` | Sessions |
-| `g n` | Notes |
-| `g a` | Activity |
-| `g p` | Providers |
-| `g c` | Channels |
-| `g i` | Integrations |
-| `g l` | Plugins |
-| `g ,` | Settings |
-| `g h` | Tutorial (this page) |
-| `n s` | New session (when on Sessions page) |
-| `Cmd / Ctrl + K` | Command palette |
-| `?` | Keyboard shortcut help dialog |
-| `Esc` | Close any open dialog / popup |
+| `opendray.theme` | `light` / `dark` / `system` |
 
-## Command palette
+## Keyboard mode
 
-Cmd/Ctrl + K opens a fuzzy-searchable command palette. Every
-admin action that has a shortcut also lives there, plus things
-that don't (e.g. *Create new note*, *Restart this session*).
+| Mode | What |
+|---|---|
+| `none` (default) | only the documented shortcuts (g s, n s, Ctrl+Tab, etc.) |
+| `vim` | xterm.js inherits Vim binding when terminal is shell with `set -o vi` |
+| `emacs` | terminal binding for emacs movements; Cmd-K opens command palette |
 
-For multi-step workflows, the palette beats memorising
-shortcuts — it shows you what's possible inline.
+Editor (Notes) bindings are independent of this setting.
+
+## Capabilities
+
+| feature | supported |
+|---|---|
+| Per-user (browser) persistence | ✓ |
+| Per-tab override | ✗ (syncs across tabs in same browser) |
+| Cross-browser sync | ✗ (browser local) |
+| Reset to defaults | ✓ button on Settings page |
+
+## Errors
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Theme reverts on reload | localStorage disabled | enable third-party storage |
+| Keyboard mode doesn't take | shell config didn't apply | edit `.bashrc` / `.zshrc` |

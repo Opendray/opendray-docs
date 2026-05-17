@@ -1,118 +1,101 @@
+---
+kind: capability
+title: Error handling
+tldr: 'All errors use a single envelope with code / message / hint / request_id. Match on code programmatically; message may change. Hint is user-facing.'
+status: stable
+since: v0.1.0
+topic: consuming
+related: [consuming/overview, reference/errors]
+capability: [error-envelope, stable-codes, request-id-correlation]
+inbound: api
+outbound: json
+x-implementation: [internal/gateway/error.go]
+---
+
 # Error handling
 
-opendray uses standard HTTP status codes. The body always has
-`{"error": "<message>"}` so you can log the underlying reason
-without parsing prose.
+> **tldr:** All errors use `{ "error": { "code", "message", "hint", "request_id" } }` envelope. Match on `code` programmatically; `message` may change. `hint` is user-facing.
 
-## Status code catalogue
+## Envelope
 
-| Status | Meaning | Retry? |
+```json
+{
+  "error": {
+    "code":       "session_not_found",
+    "message":    "No session with id s_999",
+    "hint":       "Use GET /api/v1/sessions to list visible sessions.",
+    "request_id": "req_01HGW4..."
+  }
+}
+```
+
+| Field | Stability | Use |
 |---|---|---|
-| `200` / `201` / `202` | Success | n/a |
-| `204` | Success, no body (DELETE, PATCH-no-change, etc.) | n/a |
-| `400` | Bad request — invalid JSON / missing required field / type mismatch | No (fix the request) |
-| `401` | Bearer missing or doesn't match any integration | Maybe (rotated? see [Key rotation](#consuming-key-rotation)) |
-| `403` | Authenticated but missing scope | No (re-register / edit scopes) |
-| `404` | Resource doesn't exist | Maybe (race with delete?) |
-| `409` | Conflict (name/prefix collision, already-ended session, route_prefix taken) | No |
-| `429` | Rate-limited (not currently emitted; future-compatible) | Yes, honor `Retry-After` |
-| `500` | Gateway internal error — bug or DB connectivity loss | Yes, with backoff |
-| `502` | Reverse-proxy target unreachable | Yes |
-| `503` | Integration disabled, unhealthy, or DB unavailable | Yes |
-| `504` | Reverse-proxy target timed out | Yes |
+| `code` | **stable** — match programmatically | switch on this |
+| `message` | may change | log it; don't display |
+| `hint` | may change | safe to surface to user |
+| `request_id` | always present | include in support tickets / GitHub issues |
 
-## Specific error messages worth knowing
+## Status code groups
 
-| Body | Status | What it means |
+| Range | Meaning | Examples |
 |---|---|---|
-| `unauthorized` | 401 | No credentials or invalid bearer |
-| `missing scope: <name>` | 403 | Auth ok, but the request needs a scope you don't have |
-| `integration not found` | 404 | The id in the path doesn't exist |
-| `session not found` | 404 | Session id missing — already deleted? |
-| `session has ended` | 409 | Trying to send input to a dead PTY (use `/start` first or `/sessions` to spawn fresh) |
-| `route_prefix is reserved` | 400 | Picking a prefix opendray uses internally (`auth`, `proxy`, `health`, etc.) |
-| `name already in use` | 409 | Pick a different `name` when registering |
-| `health check failed` | 503 | Reverse-proxy target's `/health` isn't returning 2xx |
+| 200–299 | success | 200 OK, 201 Created, 204 No Content |
+| 400 | client did wrong | `cwd_invalid`, `manifest_unknown_field` |
+| 401 | bad auth | `unauthenticated`, `key_revoked`, `key_expired` |
+| 403 | auth ok, scope wrong | `insufficient_scope` |
+| 404 | resource not found / not visible | `session_not_found`, `integration_not_found` |
+| 409 | conflict | `provider_id_conflict`, `rotation_in_progress` |
+| 410 | gone | `session_terminated`, `slack_thread_archived` |
+| 413 | payload too large | `proxy_body_too_large`, `injection_too_large` |
+| 429 | rate limited | `rate_limited` (see `Retry-After`) |
+| 500 | server bug | `internal_error` (include `request_id` in bug report) |
+| 502/503 | upstream / dependency | `proxy_backend_unreachable`, `embedder_unavailable` |
+
+Full code catalogue: [reference/errors](../reference/errors).
 
 ## Retry strategy
 
-Use exponential backoff with jitter for retryable codes:
+| Status | Retry? | How |
+|---|---|---|
+| 4xx (except 408, 429) | ✗ | client bug; fix code |
+| 408 timeout | ✓ | once with delay |
+| 429 rate limited | ✓ | respect `Retry-After` header |
+| 5xx | ✓ | exponential backoff, capped at 3 attempts |
+| 503 `embedder_unavailable` | ✓ | longer delay, ~30s |
+
+## SDK pattern
 
 ```ts
-async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
-  const delays = [200, 800, 2000, 5000] // ms
-  for (const d of delays) {
-    try {
-      return await fn()
-    } catch (err) {
-      const status = (err as ApiError).status
-      if (![500, 502, 503, 504].includes(status)) throw err
-      await sleep(d + Math.random() * d * 0.3)
-    }
+import { OpenDrayError } from '@opendray/sdk'
+
+try {
+  return await od.sessions.spawn({ ... })
+} catch (err) {
+  if (!(err instanceof OpenDrayError)) throw err
+
+  switch (err.code) {
+    case 'rate_limited':
+      await sleep(err.retryAfterMs ?? 1000)
+      return retry()
+    case 'provider_unavailable':
+      throw new UserFacingError(`Configure ${err.hint}`)
+    case 'cwd_invalid':
+      throw new UserFacingError('Path does not exist or unreadable')
+    default:
+      reportToSentry(err)
+      throw err
   }
-  return fn() // last attempt; let the throw bubble up
 }
 ```
 
-Don't retry `400 / 403 / 404 / 409` — they don't fix themselves.
+## Including request_id in bug reports
 
-For `401` specifically: a single retry path goes through your key
-recovery flow (re-fetch from secret store, or self-rotate) — see
-[Key rotation](#consuming-key-rotation).
+Every 500 error includes `request_id`. opendray's logs index by it:
 
-## Long-lived WebSocket reconnection
-
-The events WebSocket can drop for any reason — gateway restart,
-network blip, idle timeout. A robust consumer reconnects and
-reconciles state:
-
-```ts
-function startEventLoop(client: OpendrayClient, topics: string[]) {
-  let backoff = 1000
-  function connect() {
-    const ws = client.wsEvents(topics, handleEvent, (code) => {
-      // 1006 = abnormal close, often network. Reconnect.
-      if (code === 1000 || code === 1001) return // clean shutdown
-      setTimeout(connect, backoff)
-      backoff = Math.min(backoff * 2, 30_000)
-    })
-    ws.raw.on('open', () => { backoff = 1000 })
-  }
-  connect()
-}
+```bash
+grep req_01HGW4 /tmp/opendray.log
 ```
 
-opendray does **not** replay missed events on reconnect. If the
-gap matters to you, query the relevant REST endpoint after
-reconnecting (`GET /sessions` to learn current states) before
-trusting the live stream again.
-
-## Logging recommendations
-
-Log every non-2xx with these dimensions:
-
-| Field | Why |
-|---|---|
-| HTTP status | Lets you alert on rate of non-2xx |
-| Request method + path (without IDs) | Group failures by endpoint |
-| `error` body field | Human-readable cause |
-| Latency | Slow 5xx = downstream issue, fast 5xx = panic |
-| Bearer principal hash | If you rotate often, helps correlate failures with rotation events |
-
-For successful calls, opendray's own integration call log
-(`/integrations/_calls`, admin-only) records every request the
-gateway saw with caller attribution. Cross-check there if your
-client-side logs disagree with the server.
-
-## Reporting bugs
-
-If you see a 500 with a generic message:
-
-1. Capture the request — method, path, body, time.
-2. Check the gateway log (Settings → Logging → Live tail) for an
-   error around the same timestamp.
-3. File at <https://github.com/Opendray/opendray_v2/issues> with
-   both the request shape and the relevant log lines.
-
-opendray is small enough that most 500s are reproducible bugs;
-expect quick turnaround.
+Always include it in GitHub issues / support requests — log correlation
+is trivial with it, painful without.

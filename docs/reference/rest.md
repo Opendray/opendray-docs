@@ -1,4 +1,24 @@
+---
+kind: endpoint
+title: REST endpoints
+tldr: Synchronous HTTP API for sessions, channels, providers, memory, integrations. Auth via Bearer key in Authorization header. Authoritative source — /openapi.yaml.
+status: beta
+since: v0.1.0
+topic: reference
+related:
+  - reference/overview
+  - reference/websocket
+  - reference/errors
+  - reference/rate-limits
+  - consuming/rest-api
+x-implementation:
+  - internal/gateway/
+  - docs/public/openapi.yaml
+---
+
 # REST endpoints <Badge type="beta">Beta</Badge>
+
+> **tldr:** Synchronous HTTP API for managing sessions, channels, providers, memory, and integration keys. Auth via Bearer key. Authoritative source — [/openapi.yaml](/openapi.yaml).
 
 Synchronous HTTP API for managing sessions, channels, providers,
 memory, and integration keys.

@@ -1,96 +1,52 @@
+---
+kind: capability
+title: Claude accounts
+tldr: Multi-account Claude — each account is one ~/.claude-accounts/<name>/ dir. opendray sets CLAUDE_CONFIG_DIR per spawn. Sessions / memory / notes / channels are shared across accounts; only OAuth identity is per-account.
+status: stable
+since: v0.1.0
+topic: providers
+related:
+  - providers/overview
+  - providers/bundled
+capability:
+  - multi-account
+  - filesystem-watched
+  - mid-session-swap
+inbound: filesystem-watch
+x-implementation:
+  - internal/catalog/claude_account.go
+  - internal/catalog/claude_account_import.go
+---
+
 # Claude accounts
 
-opendray supports running multiple Claude accounts side-by-side
-on the same gateway — for example a personal account and a work
-account, or two different subscription tiers. Each session can be
-bound to a specific account; switching between them is a one-click
-operation that doesn't disturb anything else on the gateway.
+> **tldr:** Multi-account Claude — each account is one `~/.claude-accounts/<name>/` dir. opendray sets `CLAUDE_CONFIG_DIR` per spawn. Sessions / memory / notes / channels are shared across accounts; only OAuth identity is per-account.
 
-This page explains the architecture (what is shared across
-accounts, what is per-account), the canonical way to set a new
-account up, and why opendray does not offer a "paste token" form.
+## Sharing matrix
 
-## Architecture: what's shared, what isn't
+| Surface | Per account? | Shared across all? |
+|---|---|---|
+| OAuth credentials | ✓ — `<dir>/.claude/.credentials.json` | ✗ |
+| Model defaults | ✓ — per `CLAUDE_CONFIG_DIR` | ✗ |
+| Anthropic billing identity | ✓ | ✗ |
+| Session list & state | ✗ | ✓ — `sessions` table |
+| Memory (pgvector) | ✗ | ✓ — global / project / session scopes |
+| Notes vault | ✗ | ✓ — single vault on gateway disk |
+| Channels (Slack / Feishu / …) | ✗ | ✓ — gateway-level |
+| Integrations | ✗ | ✓ — gateway-level |
+| Backups / schedules | ✗ | ✓ — gateway-level |
 
-Every account boils down to one filesystem directory under
-`~/.claude-accounts/<name>/`. Claude Code reads its OAuth
-credentials, model defaults, and recent-files cache from that
-directory when the gateway sets `CLAUDE_CONFIG_DIR=<that-path>`
-on the spawned process.
+**Design point:** account = authentication identity, not a sandbox.
+Switching account swaps only the next API call's identity.
 
-What that means in practice:
+## Setup
 
-| Surface           | Per account?                       | Shared across all accounts? |
-|-------------------|------------------------------------|-----------------------------|
-| OAuth credentials | yes — `<dir>/.claude/.credentials.json` | no                      |
-| Model defaults    | yes — Claude Code stores per-`CLAUDE_CONFIG_DIR` | no                |
-| Anthropic billing | yes (each token is an account)     | no                          |
-| Session list & state | no                              | **yes** — sessions table   |
-| Memory (pgvector) | no                                 | **yes** — global / project / session scopes |
-| Notes vault       | no                                 | **yes** — single vault on gateway disk |
-| Channels (Slack / Feishu / …) | no                     | **yes** — channels are gateway-level |
-| Integrations (third-party API callers) | no            | **yes** — integrations are gateway-level |
-| Backups / schedules / targets | no                      | **yes** — gateway-level |
-
-So switching a session from `personal` to `work` only swaps which
-Anthropic identity executes the next API call. Everything else —
-the conversation history, the memory the session has built up, the
-notes it has written, the channels that get notified when it goes
-idle — stays exactly where it was.
-
-This is the design point of opendray's multi-account model: the
-account is **just an authentication identity**, not a sandbox.
-
-### Worked example
-
-Imagine three sessions running against a single shared notes vault
-and the same memory store:
-
-```
-session-A   provider=claude   account=personal
-session-B   provider=claude   account=work
-session-C   provider=codex                       (no account binding)
-```
-
-Memory written by session-A under the `project:my-app` scope is
-visible to session-B's next memory.search call, even though they
-are different Anthropic identities. Notes written by session-C
-appear in the inspector of all three. The "account" boundary
-intentionally doesn't exist in opendray's data model; it lives
-purely at the OAuth layer.
-
-If you ever do want hard isolation between two accounts (separate
-notes, separate memory), run two opendray gateways on different
-ports, each with its own database.
-
-## Setting up a new Claude account
-
-Account setup is a single host-shell command. The gateway watches
-`~/.claude-accounts/` for new directories and registers a
-`claude_accounts` row when one appears, so there is no separate
-"create row" step in the UI — the row materialises from the
-filesystem.
-
-### Step 1 — Run `claude login` under a per-account config dir
-
-On the gateway host (over SSH, `docker exec`, or however you
-normally reach it):
-
-```bash
-# Pick a short slug for the account.
-NAME=work
-
-# Create the dir and run the official Claude OAuth flow under it.
-# Claude Code writes its credentials.json relative to
-# $CLAUDE_CONFIG_DIR, so the file lands in the right place.
-mkdir -p "$HOME/.claude-accounts/$NAME"
-CLAUDE_CONFIG_DIR="$HOME/.claude-accounts/$NAME" claude login
-# … walk through the browser OAuth …
-```
-
-The token file Claude Code wrote is a self-managing credentials
-blob — Claude Code's own refresh logic handles expiry, so the
-account stays usable indefinitely without further attention.
+| # | Action | Where |
+|---|---|---|
+| 1 | Pick a slug (`work`, `personal`, `labs`) | gateway host shell |
+| 2 | `mkdir -p ~/.claude-accounts/<slug>` | gateway host shell |
+| 3 | `CLAUDE_CONFIG_DIR=~/.claude-accounts/<slug> claude login` → browser OAuth | gateway host shell |
+| 4 | opendray **Providers → Claude accounts → Import local** (or wait for filesystem watch) | opendray admin |
 
 Repeat for each account:
 
@@ -101,88 +57,107 @@ for n in personal work labs ; do
 done
 ```
 
-### Step 2 — Make opendray see the new directory
+## Config schema
 
-The gateway's filesystem watcher picks up the new directory on its
-next sweep, but you can force a synchronous scan with the
-**Import local** button in the web panel. That triggers
-`POST /api/v1/claude-accounts/import-local`, which scans
-`~/.claude-accounts/` on the gateway's own host filesystem and
-registers every directory it finds that doesn't already have a
-matching row.
+```yaml
+# Account is implicit from filesystem layout; no opendray-side config needed.
+# Per-session binding lives on the session row:
+session:
+  provider: claude
+  claude_account_id: "work"                 # filename slug under ~/.claude-accounts/
+```
 
-| Works for          | Doesn't work for                                                     |
-|--------------------|----------------------------------------------------------------------|
-| Bare metal gateway | Docker container without `$HOME` bind-mounted in                     |
-| LXC where the operator's home is reachable | Remote-managed gateway you don't have shell on |
-| Dev environments  | Mobile (the import button is intentionally web-only — there is nothing on a phone for the gateway to import from) |
+## Capabilities
 
-If `Import local` reports "Nothing to import — accounts already in
-sync" but you don't see the row, the gateway's `$HOME` from inside
-its runtime probably looks empty. Confirm with `docker exec` or
-`pct exec` and adjust your volume mount.
+| feature | supported | implementation |
+|---|---|---|
+| Multi-account Claude | ✓ | filesystem-based; `CLAUDE_CONFIG_DIR` env injection |
+| Mid-session account swap | ✓ | SIGTERM + clean re-spawn with new env, same session_id |
+| Filesystem watch | ✓ | new dir under `~/.claude-accounts/` auto-imports |
+| Manual force-sync | ✓ | `POST /api/v1/claude-accounts/import-local` |
+| Codex / Gemini multi-account | ✗ | use env-based config or wrap in custom provider |
+| Token paste-into-form | ✗ | intentionally absent (see below) |
 
-### Why is there no "Add account" form?
+## Binding & switching
 
-Earlier versions of the panel had **+ Add account** alongside
-**Import local**. It was removed because pasting an OAuth token
-into a web form produces an account that opendray cannot refresh
-(the public Anthropic API surface doesn't include a refresh
-endpoint), so the account died within the hour. Forcing the
-host-shell `claude login` flow keeps the affordance honest: every
-account in the panel is one Claude Code itself is managing.
+| Action | Effect |
+|---|---|
+| Spawn dialog → **Claude account** dropdown (only shown for `claude`) | sets `CLAUDE_CONFIG_DIR` for this spawn; persists on session row |
+| Sessions page → terminal pane → **Account switcher** (top-right) | SIGTERM running process → clean exit → re-spawn same provider/args/cwd with new env |
+| Mid-swap | session id stays the same; terminal contents reset; memory / notes / history retained |
+| Restart of an ended session | reuses the persisted `claude_account_id` |
 
-If you have a real reason to seed a row programmatically (for
-example a one-off short-lived access token in a CI pipeline), the
-underlying API endpoints are still there:
+## Errors
+
+| code | http | cause | fix |
+|---|---|---|---|
+| `claude_account_not_bound` | 400 | session's `claude_account_id` no longer exists | re-select account in spawn dialog |
+| `claude_account_dir_missing` | 503 | dir was deleted under running session | restore dir or rebind session |
+| `claude_account_credentials_invalid` | 401 | OAuth token revoked / file corrupt | re-run `claude login` for that slug |
+| `claude_account_name_invalid` | 400 | slug contains `/`, `..`, or non-printable | use `[a-z0-9-]+` only |
+
+## Limitations
+
+| limit | value | note |
+|---|---|---|
+| supported providers | claude only | codex / gemini use env vars per spawn |
+| account name regex | `[a-z0-9-]+` | sandboxed to `~/.claude-accounts/<name>/` |
+| isolation | logical only | sessions / memory / notes shared — for hard isolation, run two gateways |
+| token paste-into-form | not supported | Anthropic API doesn't expose a refresh endpoint; pasted tokens die within an hour |
+
+<details>
+<summary>📖 Narrative explanation</summary>
+
+### Worked example
+
+Three sessions, single notes vault, shared memory store:
+
+```
+session-A   provider=claude   account=personal
+session-B   provider=claude   account=work
+session-C   provider=codex                       (no account binding)
+```
+
+Memory written by session-A under `project:my-app` is visible to
+session-B's next `memory.search` call, even though they are
+different Anthropic identities. Notes written by session-C appear
+in the inspector of all three. The "account" boundary intentionally
+doesn't exist in opendray's data model; it lives purely at the
+OAuth layer.
+
+If you ever do want hard isolation between two accounts (separate
+notes, separate memory), run two opendray gateways on different
+ports, each with its own database.
+
+### Why there's no "Add account" form
+
+Earlier versions had **+ Add account** alongside **Import local**.
+Removed because pasting an OAuth token into a web form produces an
+account that opendray cannot refresh (the public Anthropic API
+doesn't include a refresh endpoint), so the account dies within the
+hour. Forcing the host-shell `claude login` flow keeps the
+affordance honest: every account in the panel is one Claude Code
+itself is managing.
+
+For programmatic seeding (CI pipeline with a short-lived token),
+the underlying API endpoints are still there:
 
 - `POST /api/v1/claude-accounts` — create the row
 - `PUT /api/v1/claude-accounts/{id}/token` — write the token file
 
-They are intentionally not surfaced as UI affordances.
+Intentionally not surfaced as UI affordances.
 
-## Binding a session to an account
+### Import-local works for / doesn't work for
 
-In the spawn dialog, the **Claude account** dropdown only appears
-when provider = `claude`. Pick the account; opendray sets
-`CLAUDE_CONFIG_DIR` for the spawned process so Claude Code reads
-from the right directory.
+| Works | Doesn't work |
+|---|---|
+| Bare metal gateway | Docker container without `$HOME` bind-mounted |
+| LXC where operator's home is reachable | Remote-managed gateway you don't have shell on |
+| Dev environments | Mobile (intentionally web-only) |
 
-The binding is persisted on the session row (`claude_account_id`)
-so a Restart of an ended session reuses the same account. There
-is no UI affordance for "binding a session to two accounts" —
-sessions are 1:1 with accounts at any given moment.
+If `Import local` says "Nothing to import" but the row doesn't
+appear, the gateway's `$HOME` from inside its runtime probably
+looks empty. Check with `docker exec` / `pct exec` and adjust the
+volume mount.
 
-## Switching mid-session
-
-Sessions page → terminal pane → **Account switcher** dropdown
-(top-right of the terminal). Picking a different account:
-
-1. Sends SIGTERM to the running process.
-2. Waits for clean exit.
-3. Re-spawns the same provider + args + cwd, but with the new
-   `CLAUDE_CONFIG_DIR`.
-4. The session id stays the same — same tab, same Inspector
-   linked note, same memory scope key.
-
-The terminal contents reset (new process, new TUI). The session
-retains every shared piece (memory, notes, history, channels);
-only the OAuth identity changes.
-
-## Limitations
-
-- Only Claude has this binding. Codex / Gemini / Shell use env
-  vars set per-process at spawn time. If you need multi-account
-  Codex, set `OPENAI_API_KEY` differently in the spawn dialog's
-  *Args*, or wrap the binary in a custom provider manifest with
-  its own per-account env logic.
-- Account names cannot contain `/`, `..`, or non-printable
-  characters. The directory lookup is sandboxed strictly to
-  `~/.claude-accounts/<name>`.
-- Deleting an account directory while a bound session is running
-  breaks the next API call from that session. opendray doesn't
-  guard against this — be careful when cleaning up host
-  filesystem state.
-- The account row's `enabled` flag is independent of token
-  validity. A row with `enabled=true` but a missing/expired
-  credentials file will fail at spawn time, not at toggle time.
+</details>

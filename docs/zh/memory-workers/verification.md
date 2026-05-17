@@ -1,97 +1,54 @@
-# 验证 & 指标
+---
+kind: concept
+title: Worker 验证 & 指标
+tldr: /memory/workers 显示 per-worker 队列深度、成功率、p95 延迟、成本。每 worker 一个手动"Run now"。失败进 DLQ。
+status: stable
+since: v0.1.0
+topic: memory-workers
+related: [memory-workers/overview, memory-workers/picking-a-worker, activity/overview]
+references:
+  capabilities: [memory]
+x-implementation: [internal/memory/worker/metrics.go, app/web/src/features/memory/workers/]
+---
 
-把某触点翻到新 worker 后,你想确认两件事:
+# Worker 验证 & 指标
 
-1. 新 worker 真的工作(无 auth / 网络问题)。
-2. 延迟 / 质量折中符合文档承诺。
+> **tldr:** `/memory/workers` 显示 per-worker 队列深度、成功率、p95 延迟、成本。每 worker 一个手动 "Run now"。失败进 DLQ。
 
-## 测试连接(即时)
+## 页面布局
 
-每个 worker 卡片都有 **Test** 按钮。它跑:
-
-```text
-system: You are a connectivity test. Reply with the single word OK and nothing else.
-user:   ping
-```
-
-通过配置好的 worker 60s 超时,显示:
-
-- **OK** + 毫秒时长 + 响应的前 200 字符。
-- **Error** + 精确错误信息(HTTP 状态 / 进程退出 / 超时 / 认证拒绝)。
-
-使用场景:
-
-- 首次为某触点挑 agent worker 后、下次 24h tick 触发前。如果 `claude --print` 没装或所选账户没认证,测试瞬间浮现。
-- 在为高频触点(cleaner / transcript)批准配置变更前,跑测试看你机器上的实际延迟。数字 > 10s 暗示配错(慢 Claude 账户、网络) — 别保存。
-
-## 24h 汇总(中期)
-
-每个 worker 卡片显示最近 24h 三项统计:
-
-```text
-N calls · 24h
-avg Xms
-Y errors      (only when > 0)
-```
-
-来自 `memory_worker_calls` 审计表。几小时活动后刷新页面看滚动窗口更新。
-
-注意什么:
-
-- **平均毫秒**几天内呈上升 = 上游变慢(Claude 拥塞、LM Studio 在换模型)。和上周比 — 一致就接受;是回归就深挖。
-- **错误数 > 0**: 展开 "Recent calls" 节看哪些调用失败、错误是什么。常见原因:
-  - 主机上缺 agent CLI(`exec: "claude": executable file not found`)
-  - Claude 账户配额耗尽(`HTTP 429`)
-  - 网络打嗝(`context deadline exceeded`)
-- **某触点启用后零调用**: 也许调度器还没触发(cleaner / gitactivity 是 24h),或者触发事件还没发生(transcript 没有会话结束)。等或强制。
-
-## 强制一次 worker 调用
-
-对有手动触发器的任务:
-
-- **Cleaner**: Project → Cleanup 标签 → "Run cleanup now"
-- **Gitactivity**: 对有陈旧行的 cwd 跑 `POST /api/v1/git-activity/run`
-
-跑一次,刷新 Workers 页看新 metric 行。
-
-对没有手动触发器的任务(gatekeeper、transcript),唯一验证路径是 **Test** 按钮 + 等下一次自然事件。
-
-## Recent calls 表
-
-每个 worker 卡片有可折叠 "Recent calls (N)" 节,显示最近 25 次调用:
-
-| 列 | 是什么 |
+| Pane | 内容 |
 |---|---|
-| when | 调用的本地时间 |
-| worker | summarizer 或 agent · provider id |
-| ms | 时长 |
-| ok | 成功 ✓,错误 ⚠ |
+| Worker 列表(左) | 每 worker 一行(ambient / scanner / cleaner / conflict / migration) |
+| 详情(右) | metric + 最近运行 + DLQ + Run now 按钮 |
 
-钻到失败调用读完整 error_message — 后端原样记录,包括 agent CLI 启动的 stderr。
+## Per-worker 指标
 
-## 回滚
+| 指标 | 来源 | 更新 |
+|---|---|---|
+| 队列深度 | 内部队列大小 | 实时 |
+| 成功率(24h) | runs / (runs + failures) | rolling 24h |
+| p95 延迟 | run duration | rolling 24h |
+| 成本(24h) | sum of token cost | rolling 24h |
+| 最近运行 | 时间戳 + 时长 | 最新 |
+| DLQ 数 | DLQ 失败 run 数 | 持久 |
 
-如果切换不工作:
+## 手动操作
 
-1. **Memory → Workers** 找到该任务。
-2. 把 worker 改回上一个值。
-3. **Save** — 下次调用生效,不需重启。
+| 按钮 | 做什么 |
+|---|---|
+| Run now | 入队一个合成 run;配置改后有用 |
+| Pause | 设 `enabled: false`;队列继续,不执行 |
+| Resume | 设 `enabled: true` |
+| Clear DLQ | 清所有 DLQ 项(手动 review 后) |
+| Replay DLQ | 把所有 DLQ 项重新入队 |
 
-指标汇总几分钟内恢复 — 旧的高延迟调用自然滚出 24h 窗口。
+## 常见 DLQ 错误
 
-## SQL 访问
-
-更深入分析,审计表是平的:
-
-```sql
-SELECT task, worker_kind, provider_id,
-       COUNT(*) AS n,
-       ROUND(AVG(duration_ms)) AS avg_ms,
-       COUNT(*) FILTER (WHERE NOT success) AS errors
-  FROM memory_worker_calls
- WHERE started_at > NOW() - INTERVAL '7 days'
- GROUP BY task, worker_kind, provider_id
- ORDER BY task, avg_ms;
-```
-
-想把过去 7 天和过去 24h 对比,或算 UI 不显示的成本 / 体量数字时用它。
+| 错误 | 含义 | 修复 |
+|---|---|---|
+| `summarizer_unavailable: connection refused` | Ollama 没跑 | `ollama serve` |
+| `summarizer_quota_exceeded` | API quota | 换 provider 或等 |
+| `summarizer_model_not_found` | 模型名打错 | 检查 `model` |
+| `summarizer_timeout` | 响应 > `timeout_seconds` | 调高 timeout 或换小模型 |
+| `scanner_pattern_invalid` | regex 不编译 | 检查 `goal_pattern` 等 |

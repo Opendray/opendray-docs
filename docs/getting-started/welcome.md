@@ -1,37 +1,63 @@
-# Welcome to OpenDray
+---
+kind: concept
+title: Welcome to opendray
+tldr: Self-hosted control gateway for AI coding CLIs (Claude Code / Codex / Gemini / shell). Web admin + mobile + REST/WS API + 8 messengers + memory + integrations. Single Go binary on your hardware.
+status: stable
+since: v0.1.0
+topic: getting-started
+related: [sessions/overview, channels/overview, providers/overview, memory/overview, integrations/overview, consuming/overview, for-ai]
+references:
+  capabilities: [sessions, channels, providers, memory, integrations]
+x-implementation:
+  - cmd/opendray/
+  - internal/
+---
 
-OpenDray is a self-hosted control plane for AI coding CLIs (Claude Code,
-Codex, Gemini CLI, …). It lets you spawn long-running CLI sessions on
-your server, drive them from any device, and bridge them to messaging
-platforms like Telegram or Discord so an idle session can ping you when
-it needs attention.
+# Welcome to opendray
 
-## What this admin lets you do
+> **tldr:** Self-hosted control gateway for AI coding CLIs (Claude Code / Codex / Gemini / shell). Web admin + mobile + REST/WS API + 8 messengers + memory + integrations. Single Go binary on your hardware.
 
-| Page | What it's for |
-| --- | --- |
-| **Sessions** | Spawn / attach to / drive CLI sessions in a multi-tab terminal. The day-to-day workbench. |
-| **Channels** | Wire up Telegram / Slack / Discord / Feishu / DingTalk / WeCom so you get notified when sessions go idle, and reply from your phone. |
-| **Providers** | Configure CLI providers (Claude, Codex, …) — paths, env vars, default args. |
-| **Integrations** | Expose opendray itself as an HTTP gateway to third-party tools (managed reverse proxy, signed integration tokens). |
-| **Activity** | Live tail of every event on the bus — useful for debugging notification flow, channel inbound, etc. |
-| **Notes** | Obsidian-compatible markdown vault with wiki-link backlinks. |
-| **Plugins** | Skills and MCP server registries — the tool catalogue your sessions can invoke. |
-| **Settings** | Auth, theme, keyboard shortcuts. |
+## What it does for you
 
-![Sidebar overview](/tutorial/sidebar-overview.png)
+| Capability | Page | Capability JSON |
+|---|---|---|
+| Spawn / observe / drive CLI sessions | [Sessions](../sessions/overview) | [/capabilities/sessions.json](/capabilities/sessions.json) |
+| Get notified + reply via Telegram / Slack / etc. | [Channels](../channels/overview) | [/capabilities/channels.json](/capabilities/channels.json) |
+| Wrap any CLI (Claude / Codex / Gemini / your own) | [Providers](../providers/overview) | [/capabilities/providers.json](/capabilities/providers.json) |
+| Cross-CLI memory + auto-capture | [Memory](../memory/overview) | [/capabilities/memory.json](/capabilities/memory.json) |
+| Mount opendray as the AI backbone for your other apps | [Integrations](../integrations/overview) | [/capabilities/integrations.json](/capabilities/integrations.json) |
 
 ## First-run checklist
 
-If you've just installed opendray, do these in order:
+| # | Action | Where |
+|---|---|---|
+| 1 | Login with admin password | top-right corner |
+| 2 | Configure a Provider (`claude` is most common) | Providers |
+| 3 | Spawn your first session | Sessions → + New |
+| 4 | Wire up a channel (Telegram = fastest) | Channels → + New |
+| 5 | Watch the session.idle ping arrive | check your chat |
 
-1. **Log in** — admin credentials live in `config.toml` or env vars.
-2. **Configure a Provider** — at minimum, point `claude` at the
-   binary path. Without this, the spawn dialog has nothing to launch.
-3. **Spawn your first session** — open Sessions → **New session** →
-   pick a provider and working directory.
-4. **Wire up a channel** (optional) — most users register a Telegram
-   bot first since it works without a public URL.
+## When to read what
 
-The rest of this guide walks through each page in detail. You can
-read it linearly or jump from the table of contents on the left.
+| Goal | Read |
+|---|---|
+| Daily workbench layout | [Sessions](../sessions/overview) |
+| Spawn dialog reference | [Spawning](../sessions/spawning) |
+| Wire your first messenger | [Channels](../channels/overview) → [Telegram](../channels/telegram) |
+| Multi-account Claude | [Claude accounts](../providers/claude-accounts) |
+| Build an app on top of opendray | [Consuming](../consuming/overview) |
+| Make AI agents consume these docs | [For AI agents](../for-ai) |
+
+## What this admin doesn't do
+
+| ✗ Out of scope |
+|---|
+| Direct LLM API calls (the CLI does that) |
+| Generic agent framework (CLI = agent) |
+| Plugin marketplace / signing infrastructure |
+| Multi-tenant SaaS, billing, payments |
+| Per-user permission systems beyond admin / integration scopes |
+
+See [manifest.json](/manifest.json) for the authoritative non-goals list.
+
+![Sidebar overview](/tutorial/sidebar-overview.png)

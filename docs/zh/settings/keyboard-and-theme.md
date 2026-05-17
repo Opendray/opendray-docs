@@ -1,67 +1,33 @@
-# 快捷键和主题(theme)
+---
+kind: capability
+title: 设置 — 键盘 & 主题
+tldr: 每用户(浏览器 local)。主题 — light/dark/system。键盘 — vim/emacs/none。持久化到 localStorage,跨 tab 同步。
+status: stable
+since: v0.1.0
+topic: settings
+related: [settings/overview, sessions/tabs]
+capability: [theme-toggle, keyboard-mode, browser-local]
+x-implementation: [app/web/src/features/settings/user/]
+---
 
-**Settings → Workspace** 下两个纯外观偏好面板。两者都持久化
-在浏览器 localStorage 里 — 不需要重启 server,不影响另一台
-机器上的其他 tab。
+# 设置 — 键盘 & 主题
 
-## 主题(theme)
+> **tldr:** 每用户(浏览器 local)。主题 —— `light` / `dark` / `system`。键盘 —— `vim` / `emacs` / `none`。持久化到 `localStorage`,跨 tab 同步。
 
-Settings → **Workspace → Appearance** 选择器:
+## 主题
 
-- **Dark** — 默认,和 admin 设计的其他部分匹配。
-- **Light** — 白天显示器用。
-- **System** — 跟随 OS 偏好;OS 切换深色模式时自动翻转。
-
-主题(theme)按浏览器持久化到 localStorage。没有 "per device
-主题" 切换 — 你账号下的每个浏览器 tab 共享一个。
-
-自定义主题 token(当你想要企业品牌)在
-`app/web/src/index.css` 下 — 改 CSS 变量并重新编译。
-opendray 不带主题编辑器。
-
-## 字号
-
-Settings → **Workspace → Font size** 缩放整个 UI(标题、
-正文、图标、终端字符):
-
-| 预设 | 缩放 |
+| 值 | 行为 |
 |---|---|
-| Compact | 85% |
-| Default | 100% |
-| Comfy | 115% |
-| Large | 130% |
+| `system`(默认) | 跟随 OS 偏好;live 变 |
+| `light` | 始终亮 |
+| `dark` | 始终暗 |
 
-在 4K 显示器上 Default 看起来太小时用 Comfy / Large;
-Sessions 工作区塞满 tab 时用 Compact。和主题一样,按浏览器
-持久化。
+## 键盘模式
 
-## 快捷键
-
-快捷键是写死的(尚不支持操作员自定义)。下面是当前的绑定表。
-
-![快捷键编辑器](/tutorial/settings-shortcuts.png)
-
-| 默认 | 动作 |
+| 模式 | 什么 |
 |---|---|
-| `g s` | Sessions |
-| `g n` | Notes |
-| `g a` | Activity |
-| `g p` | Providers |
-| `g c` | Channels |
-| `g i` | Integrations |
-| `g l` | Plugins |
-| `g ,` | Settings |
-| `g h` | 教程(这一页)|
-| `n s` | 新会话(在 Sessions 页时)|
-| `Cmd / Ctrl + K` | 命令面板 |
-| `?` | 快捷键帮助对话框 |
-| `Esc` | 关闭任何打开的对话框 / popup |
+| `none`(默认) | 仅文档化的快捷键(g s、n s、Ctrl+Tab 等) |
+| `vim` | xterm.js 在 shell `set -o vi` 时继承 Vim 键位 |
+| `emacs` | 终端 emacs 移动键位;Cmd-K 开命令面板 |
 
-## 命令面板
-
-Cmd/Ctrl + K 打开一个模糊搜索的命令面板。每个有快捷键的
-admin 动作都在那里,加上没有快捷键的(比如 *Create new
-note*、*Restart this session*)。
-
-对于多步工作流,面板比硬记快捷键好用 — 它会内联告诉你有
-哪些可能。
+编辑器(Notes)键位独立于此设置。

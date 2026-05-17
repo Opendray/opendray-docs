@@ -1,140 +1,73 @@
+---
+kind: capability
+title: LM Studio walkthrough
+tldr: LM Studio = GUI alternative to Ollama. Enable its local server, load nomic-embed-text-v1.5, point opendray's [memory.http] at port 1234.
+status: stable
+since: v0.1.0
+topic: memory
+related:
+  - memory/overview
+  - memory/configuration
+  - memory/ollama-walkthrough
+capability:
+  - openai-compat
+  - gui-managed-models
+inbound: api
+outbound: http
+x-implementation:
+  - internal/memory/embedder/openai_compat/
+---
+
 # LM Studio walkthrough
 
-LM Studio is an alternative to ollama with a GUI for managing
-local models. opendray's HTTP backend works against LM Studio
-identically — the only difference is the default port.
+> **tldr:** LM Studio = GUI alternative to Ollama. Enable its local server, load `nomic-embed-text-v1.5`, point opendray's `[memory.http]` at port 1234.
 
-## Why pick LM Studio over ollama
+## Setup
 
-| | LM Studio | ollama |
+| # | Action | Verify |
 |---|---|---|
-| GUI for browsing / loading models | ✅ | ❌ (CLI only) |
-| Default port | `1234` | `11434` |
-| Mac silicon optimised | ✅ (MLX builds available) | ✅ |
-| GGUF / MLX support | both | GGUF |
-| systemd / launchd background | manual | `brew services` / `systemctl` |
-| Model search inside app | ✅ | external `ollama search` |
+| 1 | Install LM Studio from [lmstudio.ai](https://lmstudio.ai/) | app opens |
+| 2 | Search "nomic-embed-text" → download `nomic-embed-text-v1.5` | appears in My Models |
+| 3 | Local Server tab → Load model → Start Server (default port 1234) | `curl http://localhost:1234/v1/models` |
+| 4 | Edit `config.toml` (below) | `grep memory.http config.toml` |
+| 5 | Restart opendray | log: `INFO memory ready embedder=http` |
 
-Operationally identical from opendray's view. Pick whichever GUI
-you prefer; you can run both side-by-side too.
+## Config
 
-## Step 1 · Install LM Studio
+```toml
+[memory]
+backend = "http"
 
-Download the macOS / Linux / Windows installer from
-<https://lmstudio.ai>. Open it. The first launch walks through
-picking a model.
-
-## Step 2 · Load an embedding model
-
-In the LM Studio app:
-
-1. **Search** tab → search `nomic-embed-text` (or `bge-m3`, or
-   `qwen3-embedding`).
-2. Pick a quantization (Q4_K_M is a sensible default — fast +
-   small).
-3. Download.
-4. **Local Server** tab → click the model dropdown → select your
-   downloaded embedding model.
-5. **Start Server** button. Default port is 1234.
-
-Verify from a terminal:
-
-```bash
-curl http://localhost:1234/v1/models | jq '.data[].id'
+[memory.http]
+base_url   = "http://localhost:1234/v1"
+model      = "nomic-embed-text-v1.5"
+api_key    = ""                       # blank for LM Studio local
+dimensions = 0                        # autodetect
 ```
 
-Should list at least the model you loaded.
+## When to pick over Ollama
 
-## Step 3 · Configure opendray
+| Concern | LM Studio | Ollama |
+|---|---|---|
+| GUI for model management | ✓ | ✗ (CLI only) |
+| Headless server | ✗ (GUI app) | ✓ |
+| Hugging Face browser | ✓ | ✗ |
+| Auto-update | ✓ | manual |
+| Cross-platform parity | mac / win / linux | mac / linux / win |
+| Run as service | extra work | `systemctl enable ollama` |
 
-Settings → Server → Memory:
+## Capabilities
 
-```
-Backend:               http
-Similarity threshold:  0.5
-```
-
-Under HTTP backend, two options:
-
-**Option A — click the "Auto-detected" badge**
-opendray probes both ports at startup. If LM Studio was running,
-you'll see a green badge above the form: `lmstudio · http://localhost:1234/v1 (N models)`. Click it → base URL + first
-embedding-looking model auto-fill.
-
-**Option B — preset button**
-
-```
-Click the [LM Studio] preset → fills http://localhost:1234/v1
-Type the model id (e.g. text-embedding-nomic-embed-text-v1.5)
-Leave API key blank
-```
-
-Click **Test connection** to confirm. Then **Save changes** +
-**Restart server**.
-
-After restart, status strip shows:
-
-```
-http:text-embedding-nomic-embed-text-v1.5 · 768-dim · enabled
-```
-
-## Step 4 · Verify
-
-Same flow as ollama. Test embedder roundtrips, store a memory
-from one CLI, search from another. Cross-CLI memory works.
-
-## Tuning
-
-Same model-specific threshold table as ollama:
-
-| Model family | Suggested threshold |
+| feature | supported |
 |---|---|
-| nomic-embed-text-v1.5 | 0.5 |
-| qwen3-embedding-0.6b | 0.5 |
-| qwen3-embedding-8b | 0.55 |
-| mxbai-embed-large | 0.55 |
-| bge-m3 | 0.6 |
+| OpenAI-compatible API | ✓ |
+| GPU acceleration | ✓ (Metal / CUDA / ROCm) |
+| Model picker GUI | ✓ |
+| Cross-CLI memory | ✓ |
 
-LM Studio shows model latency in its server log — `~30ms` for
-nomic, `~80ms` for bge-m3 on M-series silicon (matches ollama
-roughly).
+## Errors
 
-## Switching between ollama and LM Studio
-
-You can have both daemons running. opendray's auto-detect surfaces
-both — switch by clicking whichever you want. Memory rows tagged
-with the previous embedder name **stay searchable when you switch
-back** (we filter by embedder name to keep cosine math honest), so
-A/B testing is harmless.
-
-To wipe and re-embed under a new model: delete via the Inspector
-(small datasets) or run a SQL `DELETE FROM memories WHERE
-embedder = 'http:old-model-name'`.
-
-## Troubleshooting
-
-**Test connection returns "unreachable"**
-
-LM Studio's server isn't running. Open the app → Local Server
-tab → Start Server. Confirm `curl http://localhost:1234/v1/models`
-works.
-
-**Model loads but every embedding call returns empty vectors**
-
-You loaded a chat model, not an embedding model. Embedding model
-ids start with `text-embedding-` in LM Studio's list. Stop the
-server, switch the loaded model, restart server.
-
-**Auto-detect shows LM Studio but I prefer ollama**
-
-The presets are a starting point; click the **ollama** preset
-manually after the auto-detect badge to override. Or just edit
-the base URL field directly.
-
-**LM Studio crashes on first call after long idle**
-
-LM Studio unloads models after inactivity (default 5 min). First
-call after unload triggers a 1-3s reload. opendray's HTTP backend
-has a 30s timeout, so it survives — but the agent waiting on
-that call sees the latency. Configure LM Studio's "Keep model
-loaded" setting in the server panel.
+| code | cause | fix |
+|---|---|---|
+| `connection_refused` localhost:1234 | LM Studio server not started | Local Server tab → Start Server |
+| `model_not_loaded` | model loaded in GUI but server tab didn't pick it up | Load model again in Local Server tab |

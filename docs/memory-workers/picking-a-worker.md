@@ -1,105 +1,79 @@
+---
+kind: concept
+title: Picking a worker per task
+tldr: Opinionated table — what to assign to each background task. Defaults bias toward Haiku for quality / cost balance; Ollama for free; Sonnet only for conflict resolution.
+status: stable
+since: v0.1.0
+topic: memory-workers
+related:
+  - memory-workers/overview
+  - memory-workers/verification
+  - ambient-memory/providers
+references:
+  capabilities: [memory]
+x-implementation:
+  - internal/memory/worker/
+---
+
 # Picking a worker per task
 
-This is opinionated — the right answer depends on your hardware,
-your Claude budget, and how often you spawn sessions. The
-following recommendations come from running opendray on a Mac
-Studio with LM Studio (qwen-3.5-9b) + a Claude Pro subscription.
+> **tldr:** Opinionated table — what to assign to each background task. Defaults bias toward Haiku for quality / cost balance; Ollama for free; Sonnet only for conflict resolution.
 
-## Gatekeeper — keep on Summarizer
+## Recommended defaults
 
-Forced by design (see overview). Tweak: pin a small fast model
-specifically for the gatekeeper if your default summarizer is a
-larger one.
+| Task | Budget-conscious | Quality-conscious | Notes |
+|---|---|---|---|
+| ambient-summarize | Ollama `llama3.1:8b` | Anthropic Haiku | runs after every session.ended; volume-sensitive |
+| project-scanner | Anthropic Haiku | Anthropic Haiku | needs structured output, Ollama works but noisier |
+| conflict-resolver | Anthropic Haiku | Anthropic Sonnet | low volume, high stakes — quality matters |
+| daily-cleaner | n/a (rules-only) | n/a | no LLM needed |
 
-Config in **Memory → Workers → Gatekeeper**:
+## Per-task config
 
-- Worker: `Summarizer` (locked)
-- Provider: pick a small model row if you have one; otherwise
-  leave as "Registry default"
+```toml
+[memory.workers.ambient]
+provider = "openai-compat"        # local Ollama
+model    = "llama3.1:8b"
+max_concurrent = 2
+timeout_seconds = 30
 
-## Cleaner — Summarizer (default), Agent only if local is too dumb
+[memory.workers.scanner]
+provider = "anthropic"
+model    = "claude-haiku-4-5-20251001"
+max_concurrent = 1
+timeout_seconds = 20
 
-The cleaner judges memory entries as keep / stale / duplicate.
-This is a structured-output task with a clear JSON schema and
-clear criteria. A 7-13B local model handles it well in our
-testing — judgement quality on aged ephemeral entries
-("currently debugging X") is solid.
+[memory.workers.conflict]
+provider = "anthropic"
+model    = "claude-sonnet-4-6"
+max_concurrent = 1
+timeout_seconds = 45
+```
 
-Switch to Agent (Claude) only when:
+## Cost ballparks (per 1000 events)
 
-- Your local model returns inconsistent verdicts (mix of `keep`
-  for clearly stale entries).
-- Your memory store has lots of subtle near-duplicates that
-  semantic similarity didn't merge but a smart reviewer would.
-
-24h frequency means the cost per run is bounded. Each run
-processes up to `batch_size` (default 20) memories in one prompt
-— that's one Claude API call. With agent worker, ~10s + a few
-cents per run.
-
-## Gitactivity — Agent (Claude) recommended
-
-This is the strongest case for agent worker. The summariser
-reads 7 days of `git log` and produces a 2-3 paragraph narrative
-that every subsequent agent reads on spawn. Quality compounds.
-
-Local 9-13B models tend to produce generic summaries ("the
-project worked on memory and mobile changes"). Claude Opus
-produces specific, file-level insights ("the M16-M17 work
-introduced auto-capture tech stack scanning across
-`internal/projectscan/`, then M22 added three layers of
-transcript isolation in `internal/session/transcript.go` after a
-production bug surfaced via cross-session jsonl confusion").
-
-Config in **Memory → Workers → Git activity summariser**:
-
-- Worker: `Agent`
-- CLI: `Claude`
-- Claude account: whichever account you've authed for this
-  workspace
-
-Fires once per 24h or on stale-spawn (>12h since last refresh).
-Cost: ~1 Claude API call per day per active project — bounded
-and predictable.
-
-## Transcript — Agent (Claude) recommended for active projects
-
-Per session-end summarisation. The frequency is higher than
-gitactivity (every session vs. once a day), but each call is
-short (transcript is capped at 16 KB, so ~4k input tokens).
-
-Config: same as gitactivity. The "too sparse" guard in the
-system prompt means trivial sessions (a single "hi") cost
-nothing — Claude returns empty `<summary></summary>` and the
-journal stays metadata-only.
-
-Switch back to summarizer if:
-
-- You spawn dozens of micro-sessions per day and the cost adds
-  up.
-- You don't care about narrative-quality session summaries (the
-  metadata-only fall-back is still useful).
-
-## A reasonable starting config
-
-| Task | Worker | Why |
+| Worker @ provider | ~tokens/event | ~cost/1000 events |
 |---|---|---|
-| Gatekeeper | Summarizer (small model) | Hot path, locked anyway |
-| Cleaner | Summarizer (default) | Local handles structured judgement fine |
-| Gitactivity | **Agent — Claude** | Best quality / cost ratio; runs ≤ 1x/day |
-| Transcript | **Agent — Claude** | Session journals you'll actually read |
+| ambient @ Haiku | 800 in + 100 out | $0.30 |
+| ambient @ Ollama (local) | n/a | $0 + electricity |
+| scanner @ Haiku | 1500 in + 200 out | $0.60 |
+| conflict @ Sonnet | 2000 in + 300 out | $9 |
 
-Total Claude usage: ~5-15 API calls/day on an actively-used
-project. Cost: well under $1/day at Pro tier.
+## Trade-offs
 
-## How to test before saving
+| Choice | Pro | Con |
+|---|---|---|
+| Anthropic only | best quality, structured-output reliable | costs add up at high volume |
+| Ollama only | free | requires GPU host for reasonable latency; noisier outputs |
+| Mixed (ambient=Ollama, scanner+conflict=Anthropic) | cost + quality balance | two configs to maintain |
+| Mixed with fallback | survives Anthropic outage | more complex |
 
-For every row, the **Test** button runs a one-line synthetic
-prompt and reports the round-trip latency. Use it to:
+## Capabilities
 
-- Sanity-check that the picked Claude account is actually authed
-  on this host before the next 24h tick.
-- Compare summarizer vs. agent latency for a given task before
-  flipping the row — gives you a real number, not a guess.
-- Validate that a `gemini` agent worker even works on your box
-  (gemini CLI presence is not pre-checked).
+| feature | supported |
+|---|---|
+| Per-task provider | ✓ |
+| Per-task model override | ✓ |
+| Fallback provider on failure | ✗ (planned) |
+| Cost tracking per worker | ✓ |
+| Manual override per run | ✓ via Settings UI |

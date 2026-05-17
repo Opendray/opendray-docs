@@ -1,82 +1,108 @@
+---
+kind: capability
+title: Discord
+tldr: 创建 Discord app + bot → 开 Message Content Intent → 邀请到服务器 → Channels → New → kind=discord 粘 token。Gateway WS,不需要公网 URL。
+status: stable
+since: v0.1.0
+topic: channels
+related:
+  - channels/overview
+  - channels/notifications
+  - channels/routing
+capability:
+  - text
+  - embeds
+  - interactive-buttons
+  - select-menus
+  - threading
+  - reply-routing
+  - edit-in-place
+inbound: gateway-ws
+outbound: rest
+public-url-required: false
+setup-time-minutes: 5
+x-implementation:
+  - internal/channel/discord/
+x-api-version: discord-api-10
+---
+
 # Discord
 
-**模式:** Gateway WebSocket(无需公网 URL)
-**能力:** text · card (embeds) · buttons (components) · update_message · reply_to_message (message_reference)
-**配置时间:** 约 5 分钟
+> **tldr:** 创建 Discord application + bot → 开 Message Content Intent → 邀请到服务器 → **Channels → New → kind=discord** 粘 bot token。Gateway WebSocket,不需要公网 URL。
 
-Discord 使用一个持久的 Gateway WebSocket 作为入站,REST API 作为出站。Bot 在连接时识别一次;重连由 opendray 自动处理。
+## Setup
 
-## 1. 创建一个 Discord application + bot
+| # | 操作 | 在哪做 |
+|---|---|---|
+| 1 | [discord.com/developers/applications](https://discord.com/developers/applications) → New Application → Bot → **Reset Token** → 保存 token(仅一次显示) | Discord 开发者后台 |
+| 2 | 同 Bot 页 → **Privileged Gateway Intents** → 打开 **Message Content Intent**(必需) | Discord 开发者后台 |
+| 3 | OAuth2 → URL Generator → scope `bot` + `applications.commands` → 权限 `Send Messages`、`Embed Links`、`Read Message History` → 打开链接 → 授权 | Discord 开发者后台 |
+| 4 | Discord 客户端 → 用户设置 → Advanced → **Developer Mode** ON → 右键频道 → **Copy Channel ID** | Discord 客户端 |
+| 5 | opendray **Channels → New → kind=discord** → 粘 bot token + 默认 channel ID → Save | opendray 后台 |
 
-1. 访问 [discord.com/developers/applications](https://discord.com/developers/applications) → **New Application** → 命名(例如 `OpenDray`)。
-2. 侧栏 → **Bot** → **Reset Token** → 确认。复制 token(形如 `MTIzNDU2.AbCdEf.…`)。**你只能看到一次。** 离开页面前保存到安全位置。
+## Config schema
 
-![Discord bot token reveal](/tutorial/discord-token.png)
+```yaml
+kind: discord                            # 字面量,必填
+bot_token: string                        # 必填密文,正则 /^[A-Za-z0-9._-]{50,}$/
+default_channel_id: "1234567890123456789" # 选填,Discord snowflake
+guild_id: string                          # 选填,限定到一个服务器
+notify:
+  started:          false
+  idle:             true
+  ended:            true
+  permission_ask:   true
+repeat_policy: once-per-session
+snippet:
+  enabled:    false
+  max_lines:  10
+enabled: true
+```
 
-## 2. 启用 Message Content Intent
+## Capabilities
 
-同一个 Bot 页面,滚动到 **Privileged Gateway Intents**:
+| 能力 | 支持 | 实现备注 |
+|---|---|---|
+| 入站(Gateway WS) | ✓ | 持续 WS 连接,自动重连 |
+| Embeds | ✓ | `CardHeader` → embed `title` + color;`CardMarkdown` → `description` |
+| 交互式按钮 | ✓ | `action_row` 的 `button`(style 1=primary, 4=danger, 2=secondary) |
+| Select 菜单 | ✓ | `CardSelect` → string select |
+| 回复路由 | ✓ | `message_reference` 回复进会话 stdin |
+| 原地编辑 | ✓ | 状态变更复用 |
+| Message Content Intent | 必需 | 不开 inbound `content` 为空 |
+| 文件上传 | ✗ | 未实现 |
 
-- ✅ **Message Content Intent** — 必需。没有它,每条入站消息都带 `content=""`,bot 实际上毫无用处。
-- ✅ **Server Members Intent** — 只有需要成员元数据时才需要;开着也没事。
+## Errors
 
-点击 **Save Changes**。
+| code | http | 原因 | 修复 |
+|---|---|---|---|
+| `discord_invalid_token` | 401 | bot token 错或被 reset | 开发者后台 Reset Token 后重粘 |
+| `discord_missing_intent` | 403 | Message Content Intent 没开 | 开发者后台 → Bot 打开 |
+| `discord_channel_not_found` | 404 | channel ID 错或 bot 不在服务器 | 重新邀请,重取 ID |
+| `discord_perm_denied` | 403 | bot 缺 Send Messages / Embed Links | 用对的权限重新邀请 |
+| `discord_rate_limited` | 429 | 路由级 bucket | 遵守 `Retry-After` |
+| `discord_embed_too_long` | 400 | embed 总长 > 6000 字符 | opendray 自动拆,可调小 `snippet.max_lines` |
 
-> 在 100+ 服务器中的 bot 在使用 privileged intent 前需要 Discord 显式审核。单服务器的设置(大多数 opendray 用户)无此限制。
+## Limitations
 
-## 3. 把 bot 邀请到你的服务器
+| 限制 | 数值 | 备注 |
+|---|---|---|
+| embed 总长 | 6000 字符 | title + description + fields 合计;自动拆分 |
+| 按钮 label | 80 字符 | Discord 限制 |
+| `custom_id` | 100 字符 | Discord 限制;opendray 用不透明 ID |
+| Privileged intents | 100+ 服务器的 bot 需要审核 | 单服务器无限制 |
 
-1. 侧栏 → **OAuth2** → **URL Generator**。
-2. Scope:✅ `bot`,✅ `applications.commands`(第二个在你将来注册斜杠命令时需要;不需要也无害)。
-3. Bot Permissions:至少
-   - `Send Messages`
-   - `Embed Links`
-   - `Read Message History`
-   - `Use External Emojis`(渲染 `●` / `└` 标记更好看)
-4. 复制生成的 URL → 在浏览器打开 → 选择服务器 → **Authorize**。
+<details>
+<summary>📖 叙事说明</summary>
 
-bot 现在出现在服务器的成员列表里(opendray 连接前显示离线)。
+Discord 用持续的 Gateway WebSocket 做入站,REST API 做出站。Bot 在
+连接时身份认证一次,断线由 opendray 自动重连。
 
-## 4. 找到 channel ID
+Bot token 高度敏感:泄露 = 任何人都能控制 bot 在它加入的每个服务器
+里发消息。怀疑泄露立刻去开发者后台 Reset。
 
-1. Discord → User Settings(齿轮图标) → **Advanced** → 启用 **Developer Mode**。
-2. 右键任意 channel → **Copy Channel ID**。
+Message Content Intent 是个坑。Discord 要求你显式 opt-in 才能收到
+消息文本 —— 不开的话,每条入站 `message.content` 都是空,bot 基本
+没用。在 Bot → Privileged Gateway Intents 里打开。
 
-id 形如 `1234567890123456789`(snowflake — 长数字)。
-
-## 5. 在 opendray 中配置
-
-Channels → **New channel** → kind **Discord**。
-
-| 字段 | 值 |
-|---|---|
-| **Bot token** | 来自步骤 1 |
-| **Default channel ID** | 来自步骤 4 |
-
-保存,**Enabled = on**。
-
-## 6. 验证
-
-- 服务器日志显示 `discord channel started`,接着是 Gateway 握手(`READY` 事件)。
-- bot 状态在 Discord 成员列表中翻转为**在线**。
-- 点卡片上的 **Test** → bot 发送一条消息。
-- 在 bot 能读消息的任意 channel 输入 `/help` — opendray 在线回复。
-
-![Discord card with action buttons](/tutorial/discord-card-buttons.png)
-
-## Embed + components 渲染
-
-- `CardHeader` → embed `title` + `color`(green / red / yellow / …;opendray 按 `internal/channel/discord/discord.go` 里的 `colorMap` 把命名颜色映射到 RGB 十六进制)
-- `CardMarkdown` → embed `description`
-- `CardActions` → message `components` 数组,内含 `action_row`,里面是 `button` 元素(style 1=primary,4=danger,2=secondary)
-- `CardListItem` → embed `field` + 一个按钮行
-- `CardSelect` → 字符串 select 组件
-- `CardNote` → embed `footer.text`
-
-每个按钮的 `custom_id` 就是 opendray 发出的 `cmd:/foo` — 远在 Discord 的 100 字符上限之内。
-
-## 限制
-
-- Bot token 高度敏感:泄露的 token 让任何人都能在 bot 加入的每个服务器里控制它。怀疑泄露就从开发者门户重置。
-- Discord 的内容审核可能过滤消息 — 特别是看起来像钓鱼的(大量链接)。来自 opendray 的通知很少被绊到但值得知道。
-- Embed 总长上限 6000 字符(title + description + fields)。长的 Claude 回复会自动拆成多个 embed 消息。
+</details>

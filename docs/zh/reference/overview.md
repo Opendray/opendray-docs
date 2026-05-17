@@ -1,4 +1,19 @@
+---
+kind: concept
+title: API 参考 — 总览
+tldr: REST + WebSocket API 面。Auth = Bearer admin 或 集成 key。/api/v1 路径版本化。Per-key 限流。权威 spec — /openapi.yaml。
+status: stable
+since: v0.1.0
+topic: reference
+related: [reference/rest, reference/websocket, reference/errors, reference/rate-limits, consuming/overview]
+references:
+  capabilities: [integrations]
+x-implementation: [internal/gateway/, docs/public/openapi.yaml]
+---
+
 # API 参考 — 总览
+
+> **tldr:** REST + WebSocket API 面。Auth = Bearer admin 或 集成 key。`/api/v1` 路径版本化。Per-key 限流。权威 spec —— [/openapi.yaml](/openapi.yaml)。
 
 opendray 提供稳定的 HTTP + WebSocket API,第三方客户端可以驱动它。
 本章是 *机器可读的契约* —— 端点、payload schema、错误码、限流。

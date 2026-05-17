@@ -23,6 +23,7 @@ type Channel =
   | 'feishu'
   | 'dingtalk'
   | 'wecom'
+  | 'wechat'
   | 'bridge'
 
 const props = defineProps<{
@@ -37,6 +38,7 @@ const labels: Record<Channel, string> = {
   feishu: '飞书 Feishu',
   dingtalk: '钉钉 DingTalk',
   wecom: '企业微信 WeCom',
+  wechat: '微信 WeChat',
   bridge: 'Bridge',
 }
 

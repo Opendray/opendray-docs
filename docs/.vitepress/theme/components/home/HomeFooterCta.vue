@@ -31,17 +31,17 @@ const { lang } = useData()
 const isZh = computed(() => lang.value?.startsWith('zh'))
 
 const t = computed(() => isZh.value ? {
-  title: '开干吧。',
-  sub: '一行命令装好,五分钟接通第一个聊天频道。文档全程双语,有问题直接 GitHub Issue。',
-  start: '阅读文档',
-  gh: '查看源码',
-  hint: '完全开源 · MIT 许可 · 自托管',
+  title: '把它装上,跑起来。',
+  sub: '克隆 → docker compose 起 Postgres → go run 跑起来,5 分钟看到 :8770/admin/。文档全程 EN / 中文,有问题直接 GitHub Issue。',
+  start: '从 Quickstart 开始',
+  gh: '查看 GitHub',
+  hint: 'MIT 许可 · v1.0 稳定 · 完全自托管',
 } : {
-  title: 'Ready to ship?',
-  sub: 'One-line install. Five-minute first-channel setup. Bilingual docs (EN / 中文). Issues welcome on GitHub.',
-  start: 'Read the docs',
-  gh: 'View source',
-  hint: 'Open source · MIT licensed · Self-hosted',
+  title: 'Install it. Run it.',
+  sub: 'Clone → docker compose for Postgres → go run → :8770/admin/ in five minutes. Bilingual docs (EN / 中文). Issues welcome on GitHub.',
+  start: 'Start with Quickstart',
+  gh: 'View on GitHub',
+  hint: 'MIT licensed · v1.0 stable · self-hosted',
 })
 
 const links = computed(() => ({

@@ -1,123 +1,112 @@
+---
+kind: capability
+title: Mobile Git workflow
+tldr: Flutter app mirrors the web Git tab with a touch-first layout. Bottom-sheet branch picker, stage-all-only commit, polling cadence tuned for mobile radio. Same gateway routes.
+status: stable
+since: v0.1.0
+topic: sessions
+related:
+  - sessions/git-workflow
+  - sessions/inspector
+capability:
+  - branch-checkout
+  - stash-and-switch
+  - commit
+  - push
+  - pr-list-create-merge
+  - check-polling
+x-implementation:
+  - app/mobile/lib/features/git/
+---
+
 # Mobile Git workflow
 
-The mobile app mirrors the web's [Git workflow](#02-sessions-07-git-workflow)
-with a touch-first layout. Everything in this section is the
-mobile UI's equivalent of the web Git tab — the gateway routes
-are identical, so the two clients can operate on the same repo
-without stepping on each other.
+> **tldr:** Flutter app mirrors the [web Git tab](./git-workflow) with a touch-first layout. Bottom-sheet branch picker, stage-all-only commit, polling cadence tuned for mobile radio. Same gateway routes.
 
-Open it under **Session detail → Git tab** (the second pill at
-the top of the inspector pages).
+## Where
+
+**Session detail → Git tab** (second pill at top of inspector pages).
 
 ## Status pane
 
-The header echoes the web tab: current branch + upstream,
-ahead/behind counts, working-tree file count. Tap the working
-tree row to expand it into the file list.
-
-## Branch picker (bottom sheet)
-
-Tapping the current-branch chip opens a **bottom sheet** that
-fills 75% of the viewport — there's no room for the web's
-dropdown on a phone screen, and the sheet gives each branch
-space for its upstream subtitle and a delete affordance.
-
-| Section | What's listed |
+| Element | Source |
 |---|---|
-| **Local** | Every `refs/heads/*` ref. Current branch is pinned to the top with a checkmark icon; the rest are alphabetical. |
-| **Remote** | Every `refs/remotes/<remote>/*` ref except `HEAD` symrefs. Tapping a remote ref checks out the local branch of the same name (same as `git checkout <name>`'s remote-tracking shortcut). |
+| Current branch + upstream | `GET /git/status` |
+| Ahead / behind counts | same |
+| Working-tree file count | same |
+| Tap working-tree row | expands to file list |
 
-Each row:
+## Branch picker (bottom sheet, 75% viewport)
 
-- **Tap** the row → checkout that branch.
-- **Tap the trash icon** on the right → delete the branch
-  (disabled on the current branch).
+| Section | Lists |
+|---|---|
+| **Local** | every `refs/heads/*`; current pinned top with ✓; rest alphabetical |
+| **Remote** | every `refs/remotes/<remote>/*` except HEAD symrefs; tap → checks out local of same name |
 
-The "+ New" and "Push" buttons sit on the action strip
-alongside the chip, so the common ops are one tap from any
-screen.
+| Tap | Action |
+|---|---|
+| row | checkout that branch |
+| trash icon | delete branch (disabled on current) |
+| chip strip "+ New" / "Push" | one-tap common ops |
 
 ### Stash & switch
 
-If the working tree is dirty when you tap a branch, the server
-returns 409 + a `dirty_files` array. The mobile UI opens an
-AlertDialog showing the file list (scrollable, monospace) with
-two buttons:
-
-- **Cancel** — leave the tree alone.
-- **Stash & switch** — auto-stashes the tree
-  (`git stash push --include-untracked`) and switches.
-
-On success a Snackbar toast confirms `Switched to <name> (stashed as abc1234)`. Recover the stash later from a terminal
-with `git stash pop`.
+| # | Step |
+|---|---|
+| 1 | Tap branch with dirty tree → server 409 + `dirty_files` |
+| 2 | AlertDialog shows file list (scrollable, monospace) |
+| 3 | **Cancel** = leave tree / **Stash & switch** = `git stash push --include-untracked` + checkout |
+| 4 | Snackbar: `Switched to <name> (stashed as abc1234)` |
+| 5 | Recover from terminal: `git stash pop` |
 
 ### Delete with force fallback
 
-`-d` is the default. If git refuses with "not fully merged" the
-server returns 409, and the UI surfaces a **second** dialog —
-"Force delete? Branch is not fully merged. Forcing deletion
-will lose any commits unique to this branch." The confirm
-upgrades the call to `-D`. The two-step gating means a slip
-can't blow away work.
+| Default | `-d` (safe) |
+|---|---|
+| If "not fully merged" | second AlertDialog: `Force delete? Branch is not fully merged. Forcing deletion will lose any commits unique to this branch.` |
+| Confirm | upgrades to `-D` |
+
+Two-step gating prevents accidents.
 
 ## Commit form
 
-A simplified form lives below the file list:
-
-- **Stage all** button — there's no per-file stage UI on the
-  mobile (no hover targets). Manage individual files from the
-  web inspector or a terminal if you need finer control.
-- **Multi-line message** field — the soft keyboard reveals an
-  Enter button (added separately) so newlines work without
-  hunting the toolbar.
-- **Commit** button — disabled until something is staged.
-
-After commit, the file list and status header refresh from the
-server.
+| Field | Mobile behaviour |
+|---|---|
+| Per-file stage UI | ✗ (no hover targets) — use web or terminal for fine control |
+| **Stage all** button | available |
+| Multi-line message | soft keyboard reveals Enter button |
+| **Commit** button | disabled until staged |
+| On success | refresh file list + status header |
 
 ## Pull requests
 
-Below the commit form is the **PR section**:
+| Element | Behaviour |
+|---|---|
+| PR list | open PRs, polled 60s |
+| **+ Create** | bottom-sheet form (title / body / base with default-branch resolution) |
+| Tap PR row | inline expand → checks (30s poll while expanded) + merge form |
+| Merge methods | merge / squash / rebase |
+| Delete branch on merge | checkbox, defaults ON |
 
-- A scrollable list of open PRs, polled every 60 seconds.
-- **+ Create** opens a bottom-sheet form (title / body / base
-  with default-branch resolution).
-- Tapping a PR row expands an inline panel with the check
-  runs (polled every 30 seconds while expanded) and the merge
-  form.
-
-The merge form's options match the web's: method (merge /
-squash / rebase) and a "delete branch on merge" checkbox
-defaulting to **on**.
-
-## Polling cadence summary
-
-The mobile app polls more aggressively than the web because
-there's no event-bus subscription on iOS yet:
+## Polling cadence
 
 | Source | Cadence | Stops when |
 |---|---|---|
-| Branch list | On open + after any branch op | tab unmounts |
-| Status / file list | 8 s | tab unmounts |
-| PR list | 60 s | tab unmounts |
-| PR checks (expanded row) | 30 s | row collapses |
+| Branch list | on open + after any branch op | tab unmounts |
+| Status / file list | 8s | tab unmounts |
+| PR list | 60s | tab unmounts |
+| PR checks (expanded row) | 30s | row collapses |
+| Manual refresh | swipe-down on list | — |
 
-These intervals are tuned to feel "live" without burning radio
-on a phone. If you're plugged in and want faster updates,
-trigger a manual refresh via the swipe-down on the list.
+Mobile polls more aggressively than web because no event-bus
+subscription on iOS yet. Tuned to feel "live" without burning radio.
 
-## Differences vs the web
+## Capability gaps vs web
 
-The web Git tab has a few capabilities the mobile doesn't yet
-mirror:
+| Web has | Mobile has | Use web/terminal for |
+|---|---|---|
+| Per-file stage / unstage buttons | stage-all only | granular index control |
+| Diff drawer (unified diff on tap) | porcelain status code only | viewing diffs |
+| Force-with-lease push (opt-in checkbox) | safe push only | `--force-with-lease` |
 
-- **Per-file staging** — web has stage/unstage buttons next to
-  every changed path. Mobile is stage-all only for now.
-- **Diff drawer** — web opens a unified diff on tap. Mobile
-  shows just the porcelain status code; viewing diffs needs the
-  web or a terminal.
-- **Force-with-lease push** — web has an opt-in checkbox.
-  Mobile push always uses the safe path.
-
-All other features (branches, PRs, stash & switch, etc.) are
-on parity.
+All other features (branches, PRs, stash & switch, etc.) are on parity.

@@ -1,4 +1,16 @@
+---
+kind: concept
+title: Showcase
+tldr: Real teams + recurring usage patterns. PR to add your team. Anonymous patterns covered too.
+status: stable
+since: v0.1.0
+topic: releases
+related: [releases/changelog, releases/roadmap]
+---
+
 # Showcase
+
+> **tldr:** Real teams + recurring usage patterns. PR to add your team. Anonymous patterns covered too.
 
 Real teams using opendray in production. If you're using it and want
 to be listed here, [open a PR](https://github.com/opendray/opendray-docs/edit/main/docs/releases/showcase.md)

@@ -1,4 +1,18 @@
+---
+kind: capability
+title: 错误码
+tldr: 'REST + WS API 返回的所有错误码目录。信封 { error: { code, message, hint, request_id } }。code 程序化匹配。'
+status: stable
+since: v0.1.0
+topic: reference
+related: [reference/overview, reference/rest, consuming/error-handling]
+capability: [stable-error-codes, error-envelope]
+x-implementation: [internal/gateway/error.go]
+---
+
 # 错误码
+
+> **tldr:** REST + WS API 返回的所有错误码目录。信封 `{ error: { code, message, hint, request_id } }`。`code` 程序化匹配。
 
 REST API 所有错误响应使用统一信封:
 

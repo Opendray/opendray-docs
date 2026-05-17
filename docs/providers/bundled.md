@@ -1,76 +1,117 @@
+---
+kind: capability
+title: Bundled providers
+tldr: Per-CLI reference. claude (anthropic, JSONL + multi-account + MCP), codex (openai, opaque PTY), gemini (google, env-based auth), shell ($SHELL fallback).
+status: stable
+since: v0.1.0
+topic: providers
+related:
+  - providers/overview
+  - providers/custom
+  - providers/claude-accounts
+capability:
+  - claude
+  - codex
+  - gemini
+  - shell
+x-implementation:
+  - internal/catalog/builtins/claude.json
+  - internal/catalog/builtins/codex.json
+  - internal/catalog/builtins/gemini.json
+  - internal/catalog/builtins/shell.json
+---
+
 # Bundled providers
 
-opendray ships with manifests for the most common AI coding CLIs.
-Each section below covers what to expect when launching that
-provider for the first time.
+> **tldr:** Per-CLI reference. `claude` (anthropic, JSONL + multi-account + MCP), `codex` (openai, opaque PTY), `gemini` (google, env-based auth), `shell` ($SHELL fallback).
 
-## Claude Code
+## At-a-glance
 
-| Field | Value |
-|---|---|
-| Provider id | `claude` |
-| Default executable | `claude` (resolved via `$PATH`) |
-| Default args | none |
-| Multi-account support | yes — see [Claude accounts](#providers-claude-accounts) |
-| JSONL transcript | yes — opendray reads it for channel notifications |
-| Privileged intents | n/a |
+| Provider id | Vendor | Binary | Multi-account | JSONL transcript | MCP | Notes |
+|---|---|---|---|---|---|---|
+| `claude` | Anthropic | `claude` | ✓ | ✓ (`~/.claude/projects/`) | ✓ | primary provider; deepest config |
+| `codex` | OpenAI | `codex` | env-only | ✗ | ✗ | screen snapshot for notify |
+| `gemini` | Google | `gemini` | env-only | ✗ | ✗ | watch the free quota |
+| `shell` | system | `$SHELL` | n/a | ✗ | ✗ | not AI — regular interactive shell |
 
-Notes:
-
-- Claude Code stores per-cwd transcripts at
-  `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`. opendray
-  reads this file directly to populate notification snippets — no
-  screen-scraping required.
-- The `--continue` flag resumes the most-recent conversation in
-  the cwd. Drop it in the spawn dialog's *Args* field when
-  picking up where you left off.
-- Permission modes (`bypass permissions`, etc.) are a Claude TUI
-  feature — opendray's chrome filter strips the hint banners
-  from notification snippets but doesn't change the underlying
-  behaviour.
-
-## Codex
+## `claude` — Claude Code
 
 | Field | Value |
 |---|---|
-| Provider id | `codex` |
-| Default executable | `codex` |
-| Default args | none |
-| Multi-account support | one credential per env (no per-session binding) |
-| JSONL transcript | no — opendray uses screen snapshot for notifications |
+| `command` | `claude` (resolved via `$PATH`) |
+| `default_args` | none |
+| Multi-account | ✓ via [Claude accounts](./claude-accounts) |
+| Transcript | `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl` |
+| `runtime_options.bypass_permissions` | bool, default `false` (passes `--bypass-permissions`) |
+| `runtime_options.max_turns` | int, default `0` (unlimited) |
+| `runtime_options.skills` | bool, default `true` (opendray skill auto-injection) |
+| Notification source | reads JSONL last turn (assistant text + tool calls + results) |
+| TUI chrome filter | strips model bar, "bypass permissions" hint, status spinners, separators |
+| Resume | `--continue` resumes most-recent conversation in cwd |
 
-Notes:
-
-- Codex uses its own JSON-RPC protocol for tool use; opendray
-  treats it as an opaque CLI and just relays bytes through the
-  PTY.
-- Free-tier rate limits apply; if Codex returns "rate limit
-  exceeded" it'll surface in the terminal, opendray doesn't
-  intercept it.
-
-## Gemini CLI
+## `codex` — Codex CLI
 
 | Field | Value |
 |---|---|
-| Provider id | `gemini` |
-| Default executable | `gemini` |
-| Default args | none |
-| Multi-account support | env-based |
-| JSONL transcript | no |
+| `command` | `codex` |
+| `default_args` | none |
+| Auth | env-based (`OPENAI_API_KEY`); one credential per env |
+| Transcript | none — opendray uses vt10x screen snapshot |
+| Tool use | OpenAI JSON-RPC; opendray treats as opaque PTY |
+| Notification source | vt10x last N lines |
+| TUI chrome filter | no-op (codex is shell-like, nothing to strip) |
+| Rate limits | free-tier — surface in terminal if exceeded |
 
-Notes:
+## `gemini` — Gemini CLI
 
-- Gemini's free quota resets daily; check your quota dashboard
-  if a session starts erroring with 429.
-- The CLI's interactive prompt is more shell-like than Claude's
-  TUI; chrome filtering is a no-op (nothing to strip).
+| Field | Value |
+|---|---|
+| `command` | `gemini` |
+| `default_args` | none |
+| Auth | env-based (`GOOGLE_API_KEY`) |
+| Transcript | none |
+| Notification source | vt10x snapshot |
+| TUI chrome filter | no-op |
+| Daily quota | resets at midnight UTC; check Gemini dashboard if 429 |
 
-## Plain shell
+## `shell` — Plain shell
 
-If you want a regular shell session (no AI), you can register a
-custom provider pointing at `bash` / `zsh` / `fish` (see [Custom
-provider manifest](#providers-custom)). opendray treats it
-identically — same PTY, same idle detection, same ring buffer.
+| Field | Value |
+|---|---|
+| `command` | `$SHELL` |
+| `default_args` | `-l` (login shell) |
+| AI | ✗ — not an AI provider |
+| Use case | quick interactive session on opendray host without SSH |
+| Behaviour | identical PTY / idle detection / ring buffer as AI providers |
 
-Useful for when you need a quick interactive session on the
-opendray host without SSH'ing in.
+## Errors
+
+| code | http | cause | fix |
+|---|---|---|---|
+| `provider_unavailable` | 503 | binary not on PATH or not executable | install or fix the absolute path in provider config |
+| `provider_disabled` | 400 | `enabled: false` in DB override | toggle on in Providers page |
+| `claude_account_not_bound` | 400 | spawn picked a Claude account that no longer exists | re-select account in spawn dialog |
+
+<details>
+<summary>📖 Narrative explanation</summary>
+
+Claude is the deepest-configured provider because it's the
+primary one. Other providers use a single credential set from env
+vars without per-session binding — adequate for most use, but
+not as flexible.
+
+Codex uses its own JSON-RPC protocol for tool use; opendray treats
+it as an opaque CLI and just relays bytes through the PTY. The
+free-tier rate limits will surface in the terminal as-is —
+opendray doesn't intercept.
+
+Gemini's free quota resets daily; check the dashboard if a session
+starts erroring with 429. Interactive prompt is more shell-like
+than Claude's TUI; chrome filtering is a no-op.
+
+For a regular shell session (no AI), register `shell` or any custom
+provider pointing at `bash` / `zsh` / `fish` — same PTY, same idle
+detection, same ring buffer. Useful when you need a quick remote
+shell without SSH.
+
+</details>

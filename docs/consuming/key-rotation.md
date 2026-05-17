@@ -1,124 +1,85 @@
+---
+kind: capability
+title: Key rotation
+tldr: POST /api/v1/integrations/{id}/rotate → returns new key + 24h grace period during which old key still works. Operators rotate on schedule or after suspected leak.
+status: stable
+since: v0.1.0
+topic: consuming
+related: [consuming/authentication, integrations/auth-model]
+capability: [grace-period-rotation, immediate-revoke]
+inbound: api
+outbound: postgres
+x-implementation: [internal/integration/rotate.go]
+---
+
 # Key rotation
 
-opendray supports **immediate key rotation**: the operator clicks
-Rotate in the UI (or hits `POST /integrations/{id}/rotate-key`),
-opendray replaces the stored hash, and the old plaintext returns
-`401 unauthorized` on the very next request.
+> **tldr:** `POST /api/v1/integrations/{id}/rotate` → returns new key + 24h grace period during which old key still works. Operators rotate on schedule or after suspected leak.
 
-A consumer that's running 24/7 has to deal with that gracefully.
-This page covers the patterns.
+## Rotate API
 
-## What rotate does on the server
-
-```
-1. Generate new plaintext token + bcrypt hash.
-2. UPDATE integration SET api_key_hash = <new hash> WHERE id = ?
-3. Clear the in-memory token cache.
-4. Publish integration.key_rotated event.
-5. Return new plaintext to caller (admin in the UI).
+```http
+POST /api/v1/integrations/int_wN79.../rotate
+Authorization: Bearer od_admin_xxx
 ```
 
-The OLD plaintext is now permanently lost — neither opendray nor
-the operator can recover it. Your consumer is the only place a
-working credential exists once it's saved.
+Response:
 
-## Three patterns for handling rotate
-
-### Pattern 1 · Reload from secret store
-
-The simplest. Your app loads the key on every startup from a
-secret manager. When 401 happens during runtime, you signal "I
-need a restart" and let your operator (or a process supervisor)
-re-deploy with the new key in place.
-
-```ts
-async function callOpendray(path: string) {
-  const res = await fetch(path, {
-    headers: { Authorization: `Bearer ${apiKey}` },
-  })
-  if (res.status === 401) {
-    process.exit(75) // EX_TEMPFAIL — let supervisor restart
-  }
-  return res
+```json
+{
+  "id": "int_wN79...",
+  "api_key": "od_live_new_xxx",     // one-time reveal
+  "previous_key_expires_at": "2026-05-18T10:24:00Z"
 }
 ```
 
-Use when: small CLI tools, cronjobs, anything started fresh per
-run.
+## Grace period
 
-### Pattern 2 · Re-fetch from secret store on 401
+| Time | Old key | New key |
+|---|---|---|
+| T+0 (rotation moment) | ✓ works (tagged `rotated_pending`) | ✓ works |
+| T+24h | 401 `key_revoked` | ✓ works |
 
-Like Pattern 1 but no restart — the consumer assumes the secret
-store has the latest key and refreshes the in-process cache.
+24h is intentional — gives you time to deploy the new key without
+downtime.
 
-```ts
-async function callOpendray(path: string) {
-  let res = await tryWith(apiKey, path)
-  if (res.status === 401) {
-    apiKey = await secretStore.getLatest('opendray-key')
-    res = await tryWith(apiKey, path)
-  }
-  return res
-}
+## Recipe — zero-downtime swap
+
+| # | Action | Where |
+|---|---|---|
+| 1 | Call rotate API | opendray |
+| 2 | Save new key to secret manager | Vault / AWS Secrets / 1Password |
+| 3 | Deploy app with new key | your infra |
+| 4 | Verify (curl with new key) | your infra |
+| 5 | Done — old key expires at T+24h | automatic |
+
+## Audit
+
+Every rotation logs to `audit_log` with `action=integration.rotate`,
+`integration_id`, and `actor=<admin-token-id>`.
+
+```sql
+SELECT ts, actor, payload
+FROM audit_log
+WHERE action = 'integration.rotate'
+  AND payload->>'integration_id' = 'int_wN79...'
+ORDER BY ts DESC LIMIT 10;
 ```
 
-The operator's rotation flow is now: rotate in opendray UI →
-update secret in vault → consumer auto-recovers on next 401.
-Two manual steps but no service restart required.
+## Immediate revoke (no grace)
 
-Use when: long-running services with access to a programmatic
-secret store.
+For suspected leak:
 
-### Pattern 3 · Self-rotate (admin-credential needed)
-
-Your app holds admin credentials and rotates **for itself** when
-it sees 401, then writes the new key locally. This is what
-[demo-client](#consuming-typescript-sdk) does:
-
-```ts
-// 401 detected → log in as admin → rotate-key → write state
-const admin = new OpendrayClient({ base })
-await admin.login(adminUser, adminPassword)
-const { api_key } = await admin.rotateKey(integrationId)
-saveState({ ...state, api_key, registered_at: new Date().toISOString() })
+```http
+DELETE /api/v1/integrations/{id}
 ```
 
-Use when: development / single-machine setups where storing admin
-credentials in your app is acceptable. **Don't** ship this in
-multi-user production — admin credentials in an integration's
-threat surface defeats the point of integrations.
+→ key revoked immediately; subsequent calls → 401 `key_revoked`.
 
-## Don't proactively rotate
+## Errors
 
-Cron-based "rotate every 30 days for hygiene" loops are a common
-anti-pattern with opendray. Reasons:
-
-1. opendray has no way to push the new key to your consumer. Every
-   rotation is a manual sync step.
-2. Forgetting that step = downtime.
-3. opendray's threat model is "API key under operator control",
-   not "API key as time-bound session token". TTL doesn't add
-   security here.
-
-Rotate **on incident** — suspected leak, departing operator,
-audit log shows weird traffic. Otherwise leave keys alone.
-
-## Don't share keys across apps
-
-Each consumer gets its own integration row + key. Reasons:
-
-1. Scope sets can differ — a dashboard doesn't need
-   `session:input`, a bot does.
-2. Call-log attribution depends on per-integration keys — sharing
-   means you can't tell which app made a particular call.
-3. Rotation kills every consumer using a shared key.
-
-If you have N apps, register N integrations.
-
-## Race during rotate
-
-Between the moment the operator clicks Rotate and the moment your
-consumer picks up the new key, every in-flight request fails 401.
-There's no overlap window. Plan for ≤ a couple of seconds of
-errors during a rotate event and have your retry layer absorb it
-without paging anyone.
+| code | http | cause | fix |
+|---|---|---|---|
+| `integration_not_found` | 404 | wrong id | check `/api/v1/integrations` list |
+| `rotation_in_progress` | 409 | previous rotate < 5 minutes ago | wait |
+| `rotation_blocked_owner_only` | 403 | non-admin caller | use admin bearer |

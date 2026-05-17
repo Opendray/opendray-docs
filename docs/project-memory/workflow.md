@@ -1,112 +1,69 @@
-# Project memory — day-to-day workflow
+---
+kind: concept
+title: Project memory — workflow
+tldr: Open /memory/project → pick cwd → review sections (Goals / Decisions / State). Inline edit, mark questions resolved, export sections to Markdown.
+status: stable
+since: v0.1.0
+topic: project-memory
+related:
+  - project-memory/overview
+  - project-memory/scanner-and-cleaner
+references:
+  capabilities: [memory]
+x-implementation:
+  - app/web/src/features/memory/project/
+---
 
-## Opening Project memory
+# Project memory — workflow
 
-Three entry points, all land on the same screen scoped to one cwd:
+> **tldr:** Open `/memory/project` → pick cwd → review sections (Goals / Decisions / State). Inline edit, mark questions resolved, export sections to Markdown.
 
-- **Web**: sidebar → **Memory** → **Project** button (or
-  `Cmd-K → Project memory`)
-- **Web from a running session**: right-hand Inspector → **Memory**
-  tab → "Open project memory" button
-- **Mobile**: bottom nav → **Memory** → top **Project** button (or
-  session detail → 🏁 icon → jumps straight to the right cwd)
+## Opening
 
-If you arrive without a cwd in the URL, you'll see a picker
-listing every project that has stored memory. Truncated old data
-shows up as `orphan` and is visually muted — see section 04 for
-how to clean those up.
+| Where | Path |
+|---|---|
+| Web admin | left sidebar 🧠 → **Project** tab |
+| Direct URL | `/memory/project` |
+| API | `GET /api/v1/memory/project?cwd=/path/to/proj` |
 
-## Goal — the long-term intention
+If you have many cwds, the picker at the top filters as you type.
 
-The **Goal** tab is a single markdown editor. One paragraph is
-ideal:
+## Per-section actions
 
-> Ship the v2 backup format with WAL-aware incremental snapshots.
+| Section | Hover row | Bulk |
+|---|---|---|
+| Goals | ✓ edit · ✓ delete · ✓ promote-to-decision | clear all |
+| Decisions | ✓ edit · ✓ delete | export Markdown |
+| Open questions | ✓ mark resolved · ✓ edit · ✓ delete | clear resolved |
+| Current state | ✓ overwrite from latest session | reset |
+| Files of interest | ✓ remove | clear |
+| Recent activity | (read-only) | — |
 
-The agent reads this verbatim on every spawn into this cwd, so
-keep it crisp. Avoid:
+## Editing
 
-- ❌ "TODO: figure out backup" → too vague to act on
-- ❌ A 5-paragraph essay → bloats the spawn banner
-- ✅ "Ship the v2 backup format with WAL-aware incremental
-  snapshots." → concrete, one sentence
+| Action | Behaviour |
+|---|---|
+| Inline edit | click row text → editable field; Esc cancels, Enter saves |
+| Delete | confirms; permanent (no undo) |
+| Mark resolved (on Q) | adds `resolved: true` tag; cleaner removes on next run |
+| Export Markdown | one section → `.md` file with frontmatter |
 
-Updated by: usually you. Last-edit timestamp + `updated_by` show
-right above the editor. If an agent calls the `project_goal_set`
-MCP tool, you see a **proposal** in the Inbox tab (see below) —
-no silent overwrite.
+## Workflow patterns
 
-## Plan — current state and what's next
+| Pattern | How |
+|---|---|
+| Pre-session priming | open project memory before spawning a Claude session — agent gets latest decisions via [injection](../ambient-memory/injection) |
+| Post-session triage | scanner auto-promoted N rows during session.ended; review what landed |
+| Decision log | tag manually with `decision`; survives auto-cleanup |
+| Stale questions cleanup | filter by `unresolved + age > 30d` → mark or delete |
+| Hand off project to a different operator | export sections → commit `.md` to repo as `PROJECT_MEMORY.md` |
 
-The **Plan** tab is the same shape but meant to change more
-often. Format suggestion (not enforced):
+## Capabilities
 
-```
-Phase 1: <currently working on this>
-Phase 2: <next>
-Phase 3: <after that>
-
-Blocker: <if any>
-```
-
-When you finish Phase 1 you edit this doc directly to bump the
-phases forward. The agent on the next spawn sees the updated
-plan without you having to repeat anything in chat.
-
-## Inbox — agent-proposed edits
-
-The MCP tools `project_goal_set` and `project_plan_set` deliberately
-don't update the live doc directly — they file a **proposal** that
-appears in the **Inbox** tab. Each proposal shows:
-
-- Strong red warning: "Approve will REPLACE the current X
-  entirely. This isn't a merge."
-- Side-by-side diff: current content vs proposed content
-- The agent's stated reason for the edit
-- "Approve" (with a confirm dialog) and "Reject" buttons
-
-The diff matters: agents are eager and may try to rewrite your
-hand-crafted goal with their interpretation. Reject when you
-disagree, approve when their version is genuinely better.
-
-## Journal — what happened, automatically
-
-The **Journal** tab lists every session_end event for this cwd.
-Each entry has:
-
-- Session metadata: id (last 8 chars), provider, duration, exit
-  code
-- Recent operator inputs (last 5 user-typed messages of that
-  session)
-- _Agent activity summary_ — 1-3 paragraphs of LLM-summarised
-  "what the agent actually did" (files edited, decisions made,
-  problems debugged, blockers hit). **Only present when the
-  session had substantive work** — a 30-second "hi" exchange is
-  correctly skipped per the "too sparse" guard in the prompt.
-
-You don't write to this tab; opendray writes it on every
-`session.stopped` / `session.ended` event.
-
-If you want to record something manually (e.g. an architectural
-decision you made out-of-band), use the MCP `decision_record`
-tool from any agent session — it writes a `kind=decision` row
-that appears here.
-
-## Practical rhythm
-
-Most operators settle into this loop:
-
-1. Start a project: write a 1-sentence **Goal** and 3-phase **Plan**.
-2. Spawn an agent (Claude / Codex / Gemini) → it boots already
-   knowing what the project is about.
-3. Work. The agent's session-end automatically appends a
-   journal entry.
-4. Plan changes mid-work → edit **Plan**. Next spawn sees the
-   update.
-5. Agent proposes a new plan → review in **Inbox**, approve or
-   reject.
-6. Days later, a new agent (or you on a new machine) spawns →
-   reads all 5 layers, picks up where the last one left off.
-
-Section 03 covers the scanner and cleaner that maintain the
-auto-managed layers without your direct involvement.
+| feature | supported |
+|---|---|
+| Inline edit | ✓ |
+| Bulk operations per section | ✓ |
+| Markdown export | ✓ per section + whole project |
+| Markdown import | ✓ (paste / file upload) |
+| Audit log of edits | ✓ |

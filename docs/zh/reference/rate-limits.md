@@ -1,4 +1,18 @@
+---
+kind: capability
+title: 限流
+tldr: per 集成 key token bucket。默认 10 req/s 持续,30 突发。按 tier 覆盖(service 100/300)。Per-端点 更严。X-RateLimit-* header + 429 时 Retry-After。
+status: stable
+since: v0.1.0
+topic: reference
+related: [reference/overview, reference/errors, consuming/error-handling]
+capability: [per-key-bucket, per-tier-overrides, per-endpoint-overrides, retry-after-header]
+x-implementation: [internal/gateway/ratelimit.go]
+---
+
 # 限流
+
+> **tldr:** per 集成 key token bucket。默认 10 req/s 持续,30 突发。按 tier 覆盖(service 100/300)。Per-端点 更严。`X-RateLimit-*` header + 429 时 `Retry-After`。
 
 每个集成 key 的默认阈值。基于 token bucket(每秒补充),按 *key*
 计数,不按 IP。

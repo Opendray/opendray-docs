@@ -1,50 +1,81 @@
-# 供应商 — 概览
+---
+kind: concept
+title: Providers — 概览
+tldr: provider = opendray 能拉起的 CLI 二进制目录定义。内置 4 个(claude / codex / gemini / shell)。运行时可改 exec path / args / env,override 写 DB,叠加在内置 JSON manifest 之上。
+status: stable
+since: v0.1.0
+topic: providers
+related:
+  - providers/bundled
+  - providers/custom
+  - providers/claude-accounts
+references:
+  capabilities: [providers]
+x-implementation:
+  - internal/catalog/
+  - internal/catalog/builtins/
+---
 
-*供应商* 是 opendray 可以拉起的某个 CLI 二进制的目录化定义 —
-包括 Claude Code、OpenAI Codex、Google Gemini,以及任何你
-丢一份 manifest 进来的自定义 CLI。每个会话行都指向一个供应商
-id,所以当你"原地重启"时,供应商的可执行文件路径 / 参数 /
-环境变量都会应用到新进程上。
+# Providers — 概览
 
-## 页面上有什么
+> **tldr:** provider = opendray 能拉起的 CLI 二进制目录定义。内置 4 个(`claude` / `codex` / `gemini` / `shell`)。运行时可改 exec path / args / env,override 写 DB,叠加在内置 JSON manifest 之上。
 
-![供应商页面](/tutorial/providers-layout.png)
+## 是什么
 
-两个面板:
+provider 是 opendray 可以拉起的一个 CLI 二进制的目录定义。会话指向
+provider id,"原地重启"会用同一份 provider 配置创建新进程。
 
-1. **供应商列表** — 每一个目录化的 CLI,带有编辑 / 禁用
-   按钮。图标、显示名、描述都来自供应商的 manifest。
-2. **Claude 账号** — Claude Code 专属的多账号绑定助手(其他
-   供应商用一组来自环境变量的凭据)。
-
-## 每个供应商可配置什么
-
-每个供应商有这些可编辑字段:
-
-| 字段 | 用途 |
+| Capability JSON | 权威来源 |
 |---|---|
-| **Executable** | 绝对路径或 `$PATH` 解析的名字(如 `claude`、`/usr/local/bin/codex`)|
-| **Default args** | 每次拉起时追加在用户提供的参数前面 |
-| **Environment** | 合并到进程环境的额外环境变量 |
-| **Display name + icon** | 显示在拉起下拉框和 tab 条上 |
-| **Working-dir hint** | 预填到拉起对话框的 cwd 字段 |
-| **Disabled** | 把这个供应商从拉起下拉框里隐藏掉 |
+| [/capabilities/providers.json](/capabilities/providers.json) | 内置 providers + 自定义 manifest schema |
 
-内置的 JSON manifest 存活在二进制内部的
-`internal/catalog/builtin/`。Web UI 让你在运行时覆盖字段而
-不用动源 manifest — 覆盖项存在数据库里,叠加在内置默认值
-之上。
+## 内置
+
+| id | 厂商 | 二进制 | session 恢复 | tool use | MCP |
+|---|---|---|---|---|---|
+| `claude` | Anthropic | `claude` | ✓ | ✓ | ✓ |
+| `codex` | OpenAI | `codex` | ✗ | ✓ | ✗ |
+| `gemini` | Google | `gemini` | ✗ | ✓ | ✗ |
+| `shell` | system | `$SHELL` | ✓ | ✗ | ✗ |
+
+源:`internal/catalog/builtins/*.json`。
+
+## 每 provider 可编辑字段
+
+| 字段 | 用途 | Override 存储 |
+|---|---|---|
+| `command` | 绝对路径或 PATH 解析的二进制名 | DB → spawn 时应用 |
+| `default_args` | 每次 spawn 在用户 args 前追加 | DB |
+| `env` | 合并到进程 env 的额外环境变量 | DB(密文加密) |
+| `display_name` + `icon` | spawn 下拉 / tab strip 显示 | DB |
+| `cwd_hint` | spawn 对话框 cwd 预填 | DB |
+| `enabled` | false 时从 spawn 下拉隐藏 | DB |
+| `runtime_options` | per-provider 选项,如 claude 的 `bypass_permissions` / `max_turns` / `skills` | DB |
 
 ## 重置为默认
 
-每张供应商卡片都有一个 **Reset** 按钮,会丢掉你的运行时覆盖
-项,恢复内置 manifest 的值。当某次实验出问题、你想要一个
-干净的初始状态又不想重启 opendray 的时候,这个按钮很有用。
+每个 provider 卡片有 **Reset** 按钮 → 丢弃 DB override → 恢复内置
+manifest。实验把 provider 搞坏时不用重启 opendray。
 
-## 继续阅读
+## 何时用哪个
 
-| 主题 | 章节 |
+| 目标 | 在哪 |
 |---|---|
-| 内置供应商以及它们的坑 | 内置供应商 |
-| 通过 manifest 添加自定义供应商 | 自定义供应商 manifest |
-| 多账号 Claude 设置 | Claude 账号 |
+| 配置内置 4 个 CLI 之一 | [bundled](./bundled) |
+| 加自定义 CLI(自家 wrapper、小众 LLM CLI) | [custom](./custom) |
+| 多账号 Claude(工作 + 个人) | [claude-accounts](./claude-accounts) |
+
+![Providers 页](/tutorial/providers-layout.png)
+
+<details>
+<summary>📖 叙事说明</summary>
+
+内置的 JSON manifest 存在 Go 二进制里的 `internal/catalog/builtin/`,
+通过 `embed.FS`。Web UI 让你在运行时覆盖字段,不用改源 manifest ——
+override 存 DB,叠加在内置默认值之上。
+
+Claude 有额外配置(多账号绑定、`bypass_permissions`、`max_turns`、
+`skills`)因为它是主要 provider,也是用户配置最深的。其他 provider
+用单一凭据集合,来自环境变量(`OPENAI_API_KEY` / `GOOGLE_API_KEY`)。
+
+</details>

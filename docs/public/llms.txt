@@ -1,0 +1,162 @@
+# opendray
+
+> opendray is a self-hosted control gateway for AI coding CLIs (Claude Code, Codex, Gemini CLI). It wraps local CLIs and exposes them via REST + WebSocket so web admin, mobile apps, messaging platforms, and your own apps can all drive the same session. One Claude Pro subscription serves your entire personal-app stack instead of per-token billing.
+
+Status: v1.0 stable. Single Go binary. Self-hosted. MIT licensed.
+
+For AI agents: this site exposes machine-readable artifacts at:
+- https://docs.opendray.dev/llms.txt — this file
+- https://docs.opendray.dev/llms-full.txt — concatenated full text of every page
+- https://docs.opendray.dev/openapi.yaml — REST API spec
+- https://docs.opendray.dev/manifest.json — capability listing
+- https://docs.opendray.dev/capabilities/{channels,providers,memory,sessions,integrations}.json
+- https://docs.opendray.dev/mcp-manifest.json — connect via Model Context Protocol
+
+## Home
+
+- [opendray — Self-hosted control gateway for AI coding CLIs](https://docs.opendray.dev/): Run Claude Code, Codex, and Gemini CLI on your own server. Drive them from anywhere — web, mobile, Telegram, Slack, Feishu, DingTalk, WeCom. Self-hosted, local-first, fully open source.
+
+## Getting started
+
+- [Welcome to opendray](https://docs.opendray.dev/getting-started/welcome) [stable]: Self-hosted control gateway for AI coding CLIs (Claude Code / Codex / Gemini / shell). Web admin + mobile + REST/WS API + 8 messengers + memory + integrations. Single Go binary on your hardware.
+
+## Sessions — long-running CLI workspaces
+
+- [Git workflow](https://docs.opendray.dev/sessions/git-workflow) [stable]: Inspector Git tab = self-contained PR command center. Branch / stage / commit / push / PR create / merge / check status — all without leaving opendray. Endpoints under /api/v1/git/.
+- [Inspector panel](https://docs.opendray.dev/sessions/inspector) [stable]: Right-side collapsible panel with 7 sub-tabs (Files / Git / Search / Tasks / History / Notes / Memory). All scoped to the session's cwd. Resizable 320–900px, persisted per-user.
+- [Session lifecycle](https://docs.opendray.dev/sessions/lifecycle) [stable]: STARTING → RUNNING ↔ IDLE → STOPPED / ENDED / FAILED. Idle = no stdout for N seconds (default 30s) — process still alive. Restart re-spawns with same provider/cwd/args under a new session id.
+- [Mobile Git workflow](https://docs.opendray.dev/sessions/mobile-git) [stable]: Flutter app mirrors the web Git tab with a touch-first layout. Bottom-sheet branch picker, stage-all-only commit, polling cadence tuned for mobile radio. Same gateway routes.
+- [Multi-client session access](https://docs.opendray.dev/sessions/multi-client) [stable]: Multiple clients can attach to one session (web + mobile + Telegram), but only one should DRIVE at a time. PTY has a single size — last resize wins. For independent state, spawn separate sessions in the same cwd.
+- [Sessions — overview](https://docs.opendray.dev/sessions/overview) [stable]: The Sessions page is opendray's daily-driver workbench. Each CLI process is one tab — PTY-backed with 1 MiB ring buffer, multi-client mirrored, reconnect-safe. Session row in DB outlives the process.
+- [Spawning a session](https://docs.opendray.dev/sessions/spawning) [stable]: Sessions → + New → pick provider + cwd + (optional) name / args / claude_account / bypass / parent_session → Spawn. opendray validates cwd, forks PTY, marks RUNNING on first byte (or 500ms timeout).
+- [Tabs & keyboard nav](https://docs.opendray.dev/sessions/tabs) [stable]: Click / drag / right-click tabs. Vim-style g-prefix shortcuts. Ctrl+Tab cycles, Ctrl+1-9 jumps, Ctrl+W closes, n s opens Spawn, g i toggles Inspector.
+
+## Channels — 8 messaging-platform bridges
+
+- [Bridge — custom platforms via WebSocket](https://docs.opendray.dev/channels/bridge) [stable]: Channels → New → kind=bridge → save the WS URL + token → run an adapter in any language. The adapter speaks opendray's WS protocol; opendray treats it as a normal channel.
+- [DingTalk (钉钉)](https://docs.opendray.dev/channels/dingtalk) [stable]: Add a custom group robot to a DingTalk group → save webhook URL + SEC sign secret → paste under Channels → New → kind=dingtalk. Outbound only — no inbound, no callback buttons.
+- [Discord](https://docs.opendray.dev/channels/discord) [stable]: Create Discord app + bot → enable Message Content Intent → invite to server → paste token under Channels → New → kind=discord. Gateway WS, no public URL.
+- [Feishu (飞书 / Lark)](https://docs.opendray.dev/channels/feishu) [stable]: Create Feishu app → grab App ID + Secret → wire opendray's webhook URL into Feishu's Event Subscriptions → invite bot to chat. Requires public HTTPS URL.
+- [Notifications panel](https://docs.opendray.dev/channels/notifications) [stable]: Per-channel control over which session events fire (started / idle / ended / permission_ask), how often (repeat policy), and what content (terminal snippet) gets included.
+- [Channels — overview](https://docs.opendray.dev/channels/overview) [stable]: A channel is one messaging-platform binding. opendray bundles 7 kinds (telegram / slack / discord / feishu / dingtalk / wecom / bridge); all share the same notify + repeat-policy semantics.
+- [Multi-session routing](https://docs.opendray.dev/channels/routing) [stable]: When you reply in a channel, opendray picks the target session by priority — reply-to-message > /select pin > last-notified. Slash commands always trump routing.
+- [Slack](https://docs.opendray.dev/channels/slack) [stable]: Create Slack app → enable Socket Mode → grab xoxb + xapp tokens → paste under Channels → New → kind=slack. No public URL needed (Socket Mode).
+- [Telegram](https://docs.opendray.dev/channels/telegram) [stable]: Get a bot token from @BotFather, paste it under Channels → New → kind=telegram. Long-poll, no public URL needed.
+- [WeCom / Enterprise WeChat (企业微信)](https://docs.opendray.dev/channels/wecom) [stable]: Add a group robot to a WeCom group → save webhook URL → paste under Channels → New → kind=wecom. Outbound only — no inbound, no callback buttons.
+
+## Providers — CLI manifests (Claude / Codex / Gemini / shell)
+
+- [Bundled providers](https://docs.opendray.dev/providers/bundled) [stable]: Per-CLI reference. claude (anthropic, JSONL + multi-account + MCP), codex (openai, opaque PTY), gemini (google, env-based auth), shell ($SHELL fallback).
+- [Claude accounts](https://docs.opendray.dev/providers/claude-accounts) [stable]: Multi-account Claude — each account is one ~/.claude-accounts/<name>/ dir. opendray sets CLAUDE_CONFIG_DIR per spawn. Sessions / memory / notes / channels are shared across accounts; only OAuth identity is per-account.
+- [Custom provider manifest](https://docs.opendray.dev/providers/custom) [stable]: Drop a JSON manifest under internal/catalog/builtin/ (compile-time) or POST it to /api/v1/catalog/providers (runtime) → new CLI appears in the spawn dropdown.
+- [Providers — overview](https://docs.opendray.dev/providers/overview) [stable]: A provider = catalogued CLI binary opendray can spawn. 4 bundled (claude / codex / gemini / shell). Each has runtime-editable exec path / args / env; overrides persist in DB on top of bundled JSON manifests.
+
+## Plugins — Skills, MCP servers, git host adapters
+
+- [Git host adapters](https://docs.opendray.dev/plugins/git-hosts) [stable]: GitHub / Gitea / GitLab integrations — PAT or OAuth. Used by Notes vault sync, Sessions Git tab, PR commands. Per-host scope. Stored encrypted at rest.
+- [MCP servers](https://docs.opendray.dev/plugins/mcp) [stable]: Register MCP servers (stdio command or HTTP URL). opendray renders per-session mcp.json with auto-attached entries (e.g. opendray-memory) + your registered servers. Claude/Codex/Gemini consume per their supportsMcp flag.
+- [Plugins — overview](https://docs.opendray.dev/plugins/overview) [stable]: Tool extensions auto-injected into every spawned session. 3 kinds — Skills (markdown), MCP servers (stdio/http), Git host adapters (GitHub/Gitea/GitLab).
+- [Skills](https://docs.opendray.dev/plugins/skills) [stable]: Markdown procedures Claude can invoke. Loaded from builtins (in binary) + vault (operator-edited). Injected into system prompt on spawn. opendray skill CLI lists/loads.
+
+## Notes — Obsidian-compatible vault
+
+- [Note editor](https://docs.opendray.dev/notes/editor) [stable]: Markdown editor with Source/Preview tabs, debounced auto-save (1s), wiki-link autocomplete, code-block syntax highlighting, image paste. Same editor in Notes page + Inspector linked-note pane.
+- [Notes — overview](https://docs.opendray.dev/notes/overview) [stable]: Obsidian-compatible markdown vault on opendray's disk. Per-session linked notes auto-created. Wiki links + backlinks. Optional git sync. Same vault Claude can read back as context.
+- [Vault git sync](https://docs.opendray.dev/notes/vault-git-sync) [stable]: Optional. Vault is a git repo. opendray auto-commits + pushes on a schedule. Pull on session spawn. Merge conflicts surface in UI with manual-resolve.
+- [Wiki links + backlinks](https://docs.opendray.dev/notes/wiki-links) [stable]: [[note-name]] syntax. Resolves by filename (case-insensitive, ignores path). Autocomplete on [[. Right-pane shows incoming backlinks. Re-computed on save.
+
+## Memory — cross-CLI project memory
+
+- [Memory configuration](https://docs.opendray.dev/memory/configuration) [stable]: [memory] in config.toml + Settings → Server → Memory. Choose backend (auto / bm25 / http), default scope, top-k, similarity threshold. Zero-config = BM25 + pgvector + project scope.
+- [LM Studio walkthrough](https://docs.opendray.dev/memory/lmstudio-walkthrough) [stable]: LM Studio = GUI alternative to Ollama. Enable its local server, load nomic-embed-text-v1.5, point opendray's [memory.http] at port 1234.
+- [Local ONNX embeddings](https://docs.opendray.dev/memory/local-onnx) [experimental]: Build with `-tags local_onnx` → embed bge-m3 (1024-dim) locally without HTTP services. Heavier binary (~50MB) but no external dependency at runtime.
+- [Memory — maintenance](https://docs.opendray.dev/memory/maintenance) [stable]: Three operator concerns — embedder migration (after backend change), conflict resolution (newer-wins by default), cleanup queue (stale / superseded / conflict-flagged rows).
+- [Claude local-memory mirror](https://docs.opendray.dev/memory/mirror) [stable]: opendray reads Claude's local memory markdown files on every spawn and ingests them into pgvector as project-scoped rows so Codex / Gemini can search them.
+- [Ollama walkthrough](https://docs.opendray.dev/memory/ollama-walkthrough) [stable]: Run Ollama locally → pull nomic-embed-text → point opendray's [memory.http] at it → restart. Free, semantic search, no API key.
+- [Memory — overview](https://docs.opendray.dev/memory/overview) [stable]: Cross-CLI persistent memory layer. opendray auto-attaches a memory MCP server to every session. Claude / Codex / Gemini in the same cwd see each other's facts. Default backend BM25 (pure Go, no models, no API key).
+- [Memory — Quickstart](https://docs.opendray.dev/memory/quickstart) [stable]: Memory is on by default — no flag, no service, no API key. Spawn any session → opendray auto-attaches the memory MCP server → agent can search/store. Verify in Memory page (🧠 sidebar, shortcut g m).
+- [Memory scopes](https://docs.opendray.dev/memory/scopes) [stable]: Three scopes — session (scope_key=session_id), project (scope_key=cwd, default), global (no key). Pick based on sharing vs isolation needs.
+- [Memory troubleshooting](https://docs.opendray.dev/memory/troubleshooting) [stable]: Symptom → likely cause → fix. Cheatsheet for the 6 most common memory failure modes.
+
+## Ambient memory — auto-capture
+
+- [Ambient Memory — capture rules](https://docs.opendray.dev/ambient-memory/capture-rules) [stable]: Rule = match (provider / cwd glob / event type) + action (summarize / regex extract). Multiple rules can fire per event. Configured in Settings → Ambient Memory.
+- [Ambient Memory — injection profiles](https://docs.opendray.dev/ambient-memory/injection) [stable]: Profile = what gets injected into a session's initial context. 3 modes — dense (top-K via search), sparse (recent only), off. Picked per (provider, cwd) match.
+- [Ambient Memory — overview](https://docs.opendray.dev/ambient-memory/overview) [stable]: Auto-capture engine — extracts facts from session output without the agent calling memory_store. Rules-based + LLM-summarized. Writes to project/global scope.
+- [Ambient Memory — providers](https://docs.opendray.dev/ambient-memory/providers) [stable]: 3 summarizer backends — Anthropic API, OpenAI-compatible HTTP (Ollama / OpenAI / LocalAI), and a noop dry-run mode. Config under [ambient.summarizer].
+
+## Project memory — per-cwd scope
+
+- [Project memory — overview](https://docs.opendray.dev/project-memory/overview) [stable]: Per-cwd structured layer on top of raw memory rows. Auto-curated by scanner + cleaner workers. Surfaces as one page per project with goals / decisions / state.
+- [Project memory — reset & troubleshooting](https://docs.opendray.dev/project-memory/reset-and-troubleshooting) [stable]: Reset = wipe project memory rows for one cwd (raw memory keeps). 4 common failure modes + fixes.
+- [Scanner & cleaner — auto-managed memory](https://docs.opendray.dev/project-memory/scanner-and-cleaner) [stable]: Two workers — scanner promotes raw rows to project-memory sections, cleaner removes stale / resolved. Configured under [project_memory.scanner] and [.cleaner].
+- [Project memory — workflow](https://docs.opendray.dev/project-memory/workflow) [stable]: Open /memory/project → pick cwd → review sections (Goals / Decisions / State). Inline edit, mark questions resolved, export sections to Markdown.
+
+## Memory workers — summarization + cleanup
+
+- [Memory workers — overview](https://docs.opendray.dev/memory-workers/overview) [stable]: Background LLM workers powering ambient capture / summarization / project-memory scanner. Pluggable per task — assign Haiku for cheap, Sonnet for hard, local llama for free.
+- [Picking a worker per task](https://docs.opendray.dev/memory-workers/picking-a-worker) [stable]: Opinionated table — what to assign to each background task. Defaults bias toward Haiku for quality / cost balance; Ollama for free; Sonnet only for conflict resolution.
+- [Worker verification & metrics](https://docs.opendray.dev/memory-workers/verification) [stable]: /memory/workers shows per-worker queue depth, success rate, p95 latency, cost. Manual "run now" button per worker. Dead letters queue for failures.
+
+## Integrations — internal reverse proxy + events WS
+
+- [Integration auth model](https://docs.opendray.dev/integrations/auth-model) [stable]: Two token types — admin bearer (full UI access) + integration API key (scoped). Bearer in Authorization header. opendray adds X-Integration-ID header to proxied requests.
+- [Integration call log](https://docs.opendray.dev/integrations/call-log) [stable]: Per-integration audit trail. Separate table from audit_log for volume. Fields — timestamp, integration_id, direction, method, path, status, latency_ms, resource_kind/id.
+- [Events WebSocket](https://docs.opendray.dev/integrations/events-ws) [stable]: /api/v1/integrations/_events streams session/channel/memory events. Auth via Bearer integration key. Topic filter on connect. 25s keepalive.
+- [Integrations — overview](https://docs.opendray.dev/integrations/overview) [stable]: opendray = managed reverse-proxy + scoped API keys + event WS for external apps. Your pettracker/materialscout app registers as an integration, shares one Claude Pro subscription, gets its own audit trail.
+- [Reverse proxy](https://docs.opendray.dev/integrations/reverse-proxy) [stable]: Mount any HTTP backend behind opendray. /api/v1/proxy/<prefix>/* → <integration.base_url>/*. opendray injects X-Integration-ID, strips incoming Authorization, applies scope check.
+
+## Consuming opendray — building apps on top
+
+- [Authentication](https://docs.opendray.dev/consuming/authentication) [stable]: Bearer token in Authorization header. Two kinds — admin (od_admin_xxx) and integration (od_live_xxx). 401 codes — unauthenticated / key_revoked / key_expired. 403 — insufficient_scope.
+- [Error handling](https://docs.opendray.dev/consuming/error-handling) [stable]: All errors use a single envelope with code / message / hint / request_id. Match on code programmatically; message may change. Hint is user-facing.
+- [Key rotation](https://docs.opendray.dev/consuming/key-rotation) [stable]: POST /api/v1/integrations/{id}/rotate → returns new key + 24h grace period during which old key still works. Operators rotate on schedule or after suspected leak.
+- [Consuming opendray — overview](https://docs.opendray.dev/consuming/overview) [stable]: Third-party-dev guide for building apps that call opendray. Register integration → scoped key → REST/WS API. Replaces per-token API billing with one Claude Pro subscription.
+- [Consuming Quickstart](https://docs.opendray.dev/consuming/quickstart) [stable]: Register integration → save API key → curl POST /api/v1/sessions → tail with WS. End-to-end in 5 minutes.
+- [REST API reference](https://docs.opendray.dev/consuming/rest-api) [beta]: All consumer-facing endpoints. Sessions / channels / memory / integrations. Authoritative source — /openapi.yaml.
+- [Scopes reference](https://docs.opendray.dev/consuming/scopes) [stable]: Enumerate every scope id, route mapping, and pattern (read / write / send / subscribe). Source of truth — /capabilities/integrations.json.
+- [TypeScript SDK](https://docs.opendray.dev/consuming/typescript-sdk) [beta]: @opendray/sdk — npm install + new OpenDray(baseURL, apiKey) → sessions / channels / memory / events methods. Auto-generated from OpenAPI; ESM only.
+- [Event subscriptions](https://docs.opendray.dev/consuming/websocket-events) [stable]: WS at /api/v1/integrations/_events. Subscribe to session.* / channel.* / memory.* topic patterns. No replay — use REST events?since=<seq> to backfill.
+
+## Activity — audit log of all API calls
+
+- [Activity — overview](https://docs.opendray.dev/activity/overview) [stable]: tail -f for opendray's system-wide event bus. Every session / channel / memory / notification event scrolls through. Filterable by integration / direction / status / time / topic.
+- [Topics catalogue](https://docs.opendray.dev/activity/topics-catalogue) [stable]: Every event topic + payload schema. session.* / channel.* / memory.* / notification.* / system.*. Canonical for WS subscribe filters.
+
+## Backup — encrypted dumps + exports
+
+- [Backup — exports (Plan C)](https://docs.opendray.dev/backup/export) [stable]: /export = portable zip-bundle. Decoded data (JSON/markdown), not pg_dump. Importable into a different opendray host. AES-GCM encrypted.
+- [Backup — overview](https://docs.opendray.dev/backup/overview) [stable]: Two safety nets — encrypted pg_dump (full DB, restore-in-place) + zip-bundle export (data-only, portable across hosts). Both AES-GCM encrypted. Opt-in via OPENDRAY_BACKUP_ENABLED.
+- [Backup — quickstart](https://docs.opendray.dev/backup/quickstart) [stable]: Off by default. Set OPENDRAY_BACKUP_ENABLED=1 + OPENDRAY_BACKUP_KEY (32-byte base64). Restart → Backups page appears. Add a target → run a dump.
+- [Backup — restore (A) and import (C)](https://docs.opendray.dev/backup/restore-and-import) [stable]: /backups → pick a dump → Restore (pg_restore in place). /export → upload .zip.enc → Import (decrypted + merged). Both require OPENDRAY_BACKUP_KEY.
+- [Backup — schedules](https://docs.opendray.dev/backup/schedules) [stable]: Cron expression triggers backup runs. Fan-out to all enabled targets. Retention pruning runs after each successful upload. Default `0 2 * * *` (2am daily).
+- [Backup — targets](https://docs.opendray.dev/backup/targets) [stable]: Where the encrypted bundle lands. 8 target kinds — local-fs / S3 / R2 / B2 / GCS / Azure Blob / SMB / SFTP. Each independent retention + cron.
+
+## Settings — admin configuration
+
+- [Settings — General](https://docs.opendray.dev/settings/general) [stable]: Network binding (host/port/TLS), admin password, locale defaults. Network changes require restart; admin password takes effect immediately.
+- [Settings — Keyboard & theme](https://docs.opendray.dev/settings/keyboard-and-theme) [stable]: Per-user (browser local). Theme — light/dark/system. Keyboard — vim/emacs/none. Persists to localStorage, syncs across tabs.
+- [Settings — Logging](https://docs.opendray.dev/settings/logging) [stable]: Level (trace/debug/info/warn/error/off) + format (json/text) + destination (stdout/file/syslog). SIGHUP hot-reloads level. Live tail in UI.
+- [Settings — overview](https://docs.opendray.dev/settings/overview) [stable]: 3 groups — User (theme, keyboard, locale), Server (logging, storage paths, restart), Session defaults (per-provider runtime). Hot-reload where possible; restart for the rest.
+- [Settings — Restart](https://docs.opendray.dev/settings/restart) [stable]: Some config changes (network, storage paths, backup, memory backend) need a restart. Settings → Restart provides a guarded button that drains in-flight requests and triggers SIGTERM with grace.
+- [Settings — Session defaults](https://docs.opendray.dev/settings/session-defaults) [stable]: Per-provider runtime defaults. bypass_permissions / max_turns / skills for claude. Applies to next spawn. Per-session can override.
+- [Settings — Storage paths](https://docs.opendray.dev/settings/storage-paths) [stable]: Where opendray puts files — notes vault, runtime / session scratch, claude account dirs, backup staging. Default $HOME/.opendray. Restart required to change.
+
+## API reference — REST + WebSocket
+
+- [Error codes](https://docs.opendray.dev/reference/errors) [stable]: Catalogue of every error code returned by the REST + WS API. Envelope: { error: { code, message, hint, request_id } }. Match on code programmatically.
+- [API Reference — overview](https://docs.opendray.dev/reference/overview) [stable]: REST + WebSocket API surface. Auth = Bearer admin or integration key. Versioned via /api/v1 path. Per-key rate limits. Authoritative spec — /openapi.yaml.
+- [Rate limits](https://docs.opendray.dev/reference/rate-limits) [stable]: Token bucket per integration key. Default 10 req/s sustained, 30 burst. Override per tier (service 100/300). Per-endpoint stricter caps. X-RateLimit-* headers + Retry-After on 429.
+- [REST endpoints](https://docs.opendray.dev/reference/rest) [beta]: Synchronous HTTP API for sessions, channels, providers, memory, integrations. Auth via Bearer key in Authorization header. Authoritative source — /openapi.yaml.
+- [WebSocket events](https://docs.opendray.dev/reference/websocket) [beta]: Long-lived event stream. Bearer auth. Subscribe to topic patterns. 25s keepalive. No replay — use REST events?since=<seq> for backfill.
+
+## Releases — changelog, roadmap, showcase
+
+- [Changelog](https://docs.opendray.dev/releases/changelog) [stable]: Notable changes per release. Authoritative source — GitHub releases. SemVer. Major = breaking, minor = additive, patch = fixes.
+- [Roadmap](https://docs.opendray.dev/releases/roadmap) [stable]: High-level "why" behind upcoming work. Now / Soon / Later columns. GitHub project board is the granular tracker.
+- [Showcase](https://docs.opendray.dev/releases/showcase) [stable]: Real teams + recurring usage patterns. PR to add your team. Anonymous patterns covered too.
+
+## for-ai
+
+- [For AI agents](https://docs.opendray.dev/for-ai) [stable]: This site exposes machine-readable artifacts so AI agents can consume opendray docs without parsing HTML.
+

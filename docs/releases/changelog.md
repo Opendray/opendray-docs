@@ -1,4 +1,18 @@
+---
+kind: concept
+title: Changelog
+tldr: Notable changes per release. Authoritative source — GitHub releases. SemVer. Major = breaking, minor = additive, patch = fixes.
+status: stable
+since: v0.1.0
+topic: releases
+related: [releases/roadmap, releases/showcase]
+x-implementation:
+  - github.com/opendray/opendray/releases
+---
+
 # Changelog
+
+> **tldr:** Notable changes per release. Authoritative source — [GitHub releases](https://github.com/opendray/opendray/releases). SemVer. Major = breaking, minor = additive, patch = fixes.
 
 All notable changes to opendray are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

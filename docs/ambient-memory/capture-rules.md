@@ -1,109 +1,88 @@
+---
+kind: capability
+title: Ambient Memory — capture rules
+tldr: Rule = match (provider / cwd glob / event type) + action (summarize / regex extract). Multiple rules can fire per event. Configured in Settings → Ambient Memory.
+status: stable
+since: v0.1.0
+topic: ambient-memory
+related:
+  - ambient-memory/overview
+  - ambient-memory/providers
+  - ambient-memory/injection
+capability:
+  - rule-matcher
+  - regex-extractor
+  - summarizer-trigger
+inbound: session-events
+outbound: memory_store
+x-implementation:
+  - internal/memory/capture/rule.go
+---
+
 # Ambient Memory — capture rules
 
-A **capture rule** is "for these sessions, fire the summarizer
-when this trigger condition is met."
+> **tldr:** Rule = match (provider / cwd glob / event type) + action (summarize / regex extract). Multiple rules can fire per event. Configured in **Settings → Ambient Memory**.
 
-## Per-session vs global default
+## Rule schema
 
-`session_id` controls scope:
-- **NULL = global default** — applies to every live session that
-  doesn't have a specific override.
-- **non-NULL = session-scoped** — applies only to that one session,
-  shadows the global default.
-
-Most operators have one global rule and never set per-session
-ones. The override exists for cases like: "this session is a
-slow hand-curated review, summarize it more aggressively."
-
-## Trigger kinds
-
-### `after_messages` (default)
-
-Fire after N new user messages have arrived since the last
-capture. The most common configuration.
-
-```
-trigger_config: {"n": 6}
+```yaml
+- id: "capture-jwt-decisions"
+  match:
+    provider: [claude, codex]              # OR; empty = all
+    cwd_glob: "/Users/me/projects/**"      # optional
+    event:    [session.ended, session.idle] # OR; empty = both
+    text_contains: ["jwt", "auth"]         # AND; optional pre-filter
+  action:
+    type: summarize                        # summarize | regex_extract
+    summary_prompt: |
+      Extract authentication-related decisions from this session.
+      Focus on: secret storage, refresh strategy, scope changes.
+    scope: project                         # session | project | global
+    tags: ["auth", "ambient"]
+    confidence_threshold: 0.7              # skip if summarizer < 0.7
 ```
 
-Default n = 6. Lower numbers (3) catch more facts but cost more
-tokens; higher (10-20) is cheaper but riskier (the model may
-forget mid-conversation context that gets interrupted).
+## Action types
 
-### `on_idle`
+| `type` | What it does | Output |
+|---|---|---|
+| `summarize` | LLM-summarized facts via [providers](./providers) | one or more rows per session |
+| `regex_extract` | regex captures groups → store each as fact | row per match |
 
-Fire when the session has been idle (no new user messages) for
-at least N seconds AND new messages exist since the last fire.
+### regex_extract example
 
-```
-trigger_config: {"seconds": 60}
-```
-
-Useful when conversations come in bursts — capture the whole
-burst once it settles down rather than mid-burst.
-
-### `k_chars`
-
-Fire when the cumulative character count of new user messages
-crosses K.
-
-```
-trigger_config: {"k": 4000}
+```yaml
+action:
+  type: regex_extract
+  pattern: 'package manager preference[:\s]+(?P<pm>\w+)'
+  template: "preferred package manager: ${pm}"
+  scope: project
 ```
 
-Default 4000 (≈ 1000 tokens). Length-aware alternative to
-`after_messages` for chats where prompts vary widely (long
-prompt = one trigger, ten short prompts = one trigger).
+## Defaults
 
-### `manual`
+| Rule | Behaviour |
+|---|---|
+| Built-in `session-summary` | summarize Claude/Codex/Gemini sessions on `session.ended`, 50-token max |
+| Built-in `permission-asks` | regex-extract `--bypass-permissions` discussions, store as project-scoped |
+| User rules | applied AFTER built-ins; can override via `id` |
 
-Never auto-fires. Only triggered via the **Run now** button or
-`POST /api/v1/memory-capture-rules/{id}/run-now`.
+## Capabilities
 
-Useful for batch / on-demand workflows where you don't want
-ongoing capture but periodically want to dump the current
-transcript into memory.
+| feature | supported |
+|---|---|
+| Pre-filter (cwd_glob, text_contains) | ✓ |
+| Multiple rules per event | ✓ |
+| Dry-run preview | ✓ (`noop` summarizer + log) |
+| Per-rule confidence threshold | ✓ |
+| Disable built-in rules | ✓ (set `enabled: false` for the id) |
+| Hot reload | ✓ (Settings page Save) |
+| Per-rule tag injection | ✓ |
 
-## Dedup threshold
+## Errors
 
-Each extracted fact is run through `memory.Search` against the
-target scope before insertion. If any existing memory comes back
-with similarity > `dedup_threshold` (default 0.85), the fact is
-skipped.
-
-- 0.95 = strict (only skip near-identical phrasings)
-- 0.85 = recommended (catches paraphrases reliably)
-- 0.70 = loose (may drop facts that should be kept; appropriate
-  for very narrow projects)
-
-The skipped/stored split is recorded in
-`memory_summarizer_calls.facts_skipped_dedup` /
-`facts_stored` so you can tune over time.
-
-## Target scope
-
-Where the extracted fact gets stored:
-- `session` — visible only to this session
-- `project` (default) — visible to every session in the same cwd
-- `global` — visible everywhere
-
-Project is right for almost every workflow. Global is useful for
-operator-level preferences that aren't tied to any specific
-project.
-
-## Failure backoff
-
-When a provider fails 3 consecutive times for a given
-(rule, session) pair, the engine pauses that pair for 1 hour.
-This prevents a misconfigured rule from burning cycles every
-tick. The pause is in-memory — restarting opendray clears it.
-
-## Run now
-
-Every rule has a **Run now** button (UI) /
-`POST /memory-capture-rules/{id}/run-now` (API) that fires the
-rule immediately, bypassing trigger evaluation and pause state.
-Useful for:
-- Manual triggers
-- Testing a freshly-created rule
-- Forcing a fact extraction before ending a session
+| code | http | cause | fix |
+|---|---|---|---|
+| `capture_rule_invalid` | 400 | bad YAML / unknown field | check schema |
+| `regex_pattern_invalid` | 400 | regex doesn't compile | test in `regex101.com` first |
+| `capture_skipped_threshold` | (log info) | summary confidence < threshold | tune threshold or improve prompt |

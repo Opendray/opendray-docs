@@ -1,123 +1,80 @@
-# Quickstart
+---
+kind: concept
+title: Consuming Quickstart
+tldr: Register integration → save API key → curl POST /api/v1/sessions → tail with WS. End-to-end in 5 minutes.
+status: stable
+since: v0.1.0
+topic: consuming
+related: [consuming/overview, consuming/authentication, consuming/rest-api]
+references:
+  capabilities: [integrations]
+---
 
-End-to-end in 5 minutes with `curl`. By the end you'll have a
-running Claude session that you spawned through the API.
+# Consuming Quickstart
 
-## Prerequisites
+> **tldr:** Register integration → save API key → `curl POST /api/v1/sessions` → tail with WS. End-to-end in 5 minutes.
 
-- opendray running and reachable (default `http://127.0.0.1:8770`).
-- Admin credentials (defaults: `admin` / `12345678` from
-  `config.toml [admin]`).
-- One installed agent provider — `shell` ships with opendray, no
-  setup needed.
+## Setup
 
-## Step 1 · Mint an admin token
+| # | Action | Verify |
+|---|---|---|
+| 1 | opendray **Integrations → Register** → name `quicktest` → base_url `http://localhost:9999` → scopes `session:read`, `session:write`, `event:subscribe:session.*` | row appears |
+| 2 | Save the one-time-revealed key `od_live_xxx` | (stored in your secret manager) |
+| 3 | `curl -X POST` to spawn a session | 201 with `s_xxx` id |
+| 4 | `wscat -c` to subscribe to its output | events stream |
+| 5 | `curl POST /input` to send text | session reacts |
+
+## Step 3 — spawn
 
 ```bash
-ADMIN=$(curl -s -X POST http://127.0.0.1:8770/api/v1/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"12345678"}' \
-  | jq -r .token)
-```
-
-This token is short-lived (default 24h) and full-power. **Use it
-once** to register your integration and then forget about it.
-
-## Step 2 · Register a consumer-only integration
-
-```bash
-RESP=$(curl -s -X POST http://127.0.0.1:8770/api/v1/integrations \
-  -H "Authorization: Bearer $ADMIN" \
-  -H 'Content-Type: application/json' \
+curl -X POST http://localhost:8770/api/v1/sessions \
+  -H "Authorization: Bearer od_live_xxx" \
+  -H "Content-Type: application/json" \
   -d '{
-    "name": "my-app",
-    "base_url": "",
-    "route_prefix": "",
-    "scopes": [
-      "session:read",
-      "session:create",
-      "session:input",
-      "event:subscribe:session.*"
-    ],
-    "version": "0.1.0"
-  }')
+    "provider": "claude",
+    "cwd": "/tmp/quicktest",
+    "name": "smoke-test"
+  }'
 
-echo "$RESP" | jq -r .api_key
+# → 201 { "id": "s_42", "state": "running", ... }
 ```
 
-Copy the printed `api_key` — opendray won't show it again.
+## Step 4 — tail output via WS
 
 ```bash
-KEY="odk_live_…the_key_you_just_copied"
+wscat -c "ws://localhost:8770/api/v1/integrations/_events" \
+  -H "Authorization: Bearer od_live_xxx" \
+  -x '{"type":"subscribe","topics":["session.s_42.output"]}'
+
+# → {"topic":"session.s_42.output","payload":{"stream":"stdout","data":"..."}}
 ```
 
-## Step 3 · List sessions
+## Step 5 — send input
 
 ```bash
-curl -s http://127.0.0.1:8770/api/v1/sessions \
-  -H "Authorization: Bearer $KEY" \
-  | jq .sessions
-```
+curl -X POST http://localhost:8770/api/v1/sessions/s_42/input \
+  -H "Authorization: Bearer od_live_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"hello\n"}'
 
-200 → an array (possibly empty). 401 → key wrong / scopes wrong /
-integration disabled.
-
-## Step 4 · Spawn a shell session
-
-```bash
-SESSION=$(curl -s -X POST http://127.0.0.1:8770/api/v1/sessions \
-  -H "Authorization: Bearer $KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "name": "demo",
-    "provider_id": "shell",
-    "cwd": "/tmp"
-  }')
-
-SESSION_ID=$(echo "$SESSION" | jq -r .id)
-echo "spawned $SESSION_ID"
-```
-
-## Step 5 · Send input
-
-```bash
-curl -s -X POST \
-  "http://127.0.0.1:8770/api/v1/sessions/$SESSION_ID/input" \
-  -H "Authorization: Bearer $KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{"data": "echo hello\n"}'
-```
-
-> **Important**: shell expects `\n`. **Claude expects `\r`** (raw
-> mode). Wrong terminator = your prompt sits in the input box
-> uncommitted.
-
-## Step 6 · Read the output
-
-```bash
-curl -s "http://127.0.0.1:8770/api/v1/sessions/$SESSION_ID/buffer" \
-  -H "Authorization: Bearer $KEY"
-```
-
-Returns the PTY ring buffer as raw bytes (ANSI-coloured shell
-output). The last few lines should contain `hello`.
-
-## Step 7 · Cleanup
-
-```bash
-curl -s -X DELETE \
-  "http://127.0.0.1:8770/api/v1/sessions/$SESSION_ID" \
-  -H "Authorization: Bearer $KEY" \
-  -o /dev/null -w '%{http_code}\n'
 # → 204
 ```
 
 ## What you just proved
 
-- The same `api_key` authenticates **every** call from steps 3-7.
-- You never used the admin token after step 2.
-- Your scope set restricted what you could do — try a `provider:read`
-  call and you'll get 403 because we didn't include that scope.
+| Capability | Evidence |
+|---|---|
+| Scoped auth works | the curl call succeeded only because key has `session:write` |
+| Sessions API | spawn returned `s_42` |
+| WS event push | output streamed in real time |
+| Input round-trip | text appeared in PTY |
 
-For the WebSocket event subscription side of the API, jump to
-[Event subscriptions](#consuming-websocket-events).
+## Next
+
+| Topic | Read |
+|---|---|
+| Scope vocabulary | [scopes](./scopes) |
+| All REST endpoints | [rest-api](./rest-api) |
+| Typed client | [typescript-sdk](./typescript-sdk) |
+| Production error handling | [error-handling](./error-handling) |
+| Zero-downtime key swap | [key-rotation](./key-rotation) |

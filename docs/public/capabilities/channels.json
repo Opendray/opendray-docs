@@ -1,0 +1,162 @@
+{
+  "$schema": "https://docs.opendray.dev/capabilities/_meta.schema.json",
+  "subsystem": "channels",
+  "version": "1.0.0",
+  "stability": "stable",
+  "description": "Outbound notifications + bidirectional reply routing across 8 messaging platforms. Source: internal/channel/.",
+  "since": "v0.1.0",
+  "implementation": "internal/channel/",
+  "kinds": [
+    {
+      "id": "telegram",
+      "label": "Telegram",
+      "inbound": "long-poll",
+      "outbound": "rest",
+      "public_url_required": false,
+      "setup_time_minutes": 2,
+      "capabilities": ["text", "html-parse-mode", "inline-buttons", "reply-routing", "edit-in-place"],
+      "config": {
+        "kind": { "type": "literal", "value": "telegram", "required": true },
+        "token": { "type": "secret", "regex": "^\\d+:[A-Za-z0-9_-]+$", "required": true, "source": "@BotFather /newbot" },
+        "default_chat_id": { "type": "integer", "required": false, "source": "@userinfobot or /myid" }
+      },
+      "errors": ["channel_kind_unsupported", "tg_invalid_token", "tg_chat_not_found", "tg_rate_limited"],
+      "implementation": "internal/channel/telegram/",
+      "audience": "international devs, single-person workflows"
+    },
+    {
+      "id": "slack",
+      "label": "Slack",
+      "inbound": "events-api",
+      "outbound": "web-api",
+      "public_url_required": true,
+      "setup_time_minutes": 8,
+      "capabilities": ["text", "blocks", "threading", "reactions", "reply-routing", "edit-in-place"],
+      "config": {
+        "kind": { "type": "literal", "value": "slack", "required": true },
+        "bot_token": { "type": "secret", "regex": "^xoxb-", "required": true },
+        "app_token": { "type": "secret", "regex": "^xapp-", "required": false, "note": "for Socket Mode" },
+        "signing_secret": { "type": "secret", "required": false, "note": "for HTTP Events API" }
+      },
+      "errors": ["slack_invalid_token", "slack_channel_not_found", "slack_thread_archived"],
+      "implementation": "internal/channel/slack/",
+      "audience": "team workspaces"
+    },
+    {
+      "id": "discord",
+      "label": "Discord",
+      "inbound": "gateway",
+      "outbound": "rest",
+      "public_url_required": false,
+      "setup_time_minutes": 5,
+      "capabilities": ["text", "embeds", "threads", "reactions", "reply-routing"],
+      "config": {
+        "kind": { "type": "literal", "value": "discord", "required": true },
+        "bot_token": { "type": "secret", "required": true, "source": "Discord Developer Portal" },
+        "guild_id": { "type": "string", "required": false }
+      },
+      "errors": ["discord_invalid_token", "discord_missing_intent", "discord_rate_limited"],
+      "implementation": "internal/channel/discord/"
+    },
+    {
+      "id": "feishu",
+      "label": "Feishu (Lark)",
+      "inbound": "webhook-callback",
+      "outbound": "tenant-api",
+      "public_url_required": true,
+      "setup_time_minutes": 10,
+      "capabilities": ["text", "card", "interactive-buttons", "reply-routing"],
+      "config": {
+        "kind": { "type": "literal", "value": "feishu", "required": true },
+        "app_id": { "type": "string", "required": true, "source": "Feishu Open Platform" },
+        "app_secret": { "type": "secret", "required": true },
+        "verification_token": { "type": "secret", "required": false },
+        "encrypt_key": { "type": "secret", "required": false }
+      },
+      "errors": ["feishu_invalid_app", "feishu_chat_not_found", "feishu_signature_mismatch"],
+      "implementation": "internal/channel/feishu/",
+      "audience": "Chinese enterprise"
+    },
+    {
+      "id": "dingtalk",
+      "label": "DingTalk (钉钉)",
+      "inbound": "none",
+      "outbound": "group-robot",
+      "public_url_required": false,
+      "setup_time_minutes": 3,
+      "capabilities": ["text", "markdown-card", "action-card"],
+      "config": {
+        "kind": { "type": "literal", "value": "dingtalk", "required": true },
+        "webhook_url": { "type": "secret", "required": true, "source": "group → robot management" },
+        "secret": { "type": "secret", "required": false, "note": "for HMAC signing" }
+      },
+      "errors": ["dingtalk_invalid_webhook", "dingtalk_signature_required"],
+      "implementation": "internal/channel/dingtalk/",
+      "audience": "Chinese enterprise (outbound only)"
+    },
+    {
+      "id": "wecom",
+      "label": "WeCom (企业微信)",
+      "inbound": "none",
+      "outbound": "group-robot",
+      "public_url_required": false,
+      "setup_time_minutes": 3,
+      "capabilities": ["text", "markdown"],
+      "config": {
+        "kind": { "type": "literal", "value": "wecom", "required": true },
+        "webhook_url": { "type": "secret", "required": true, "source": "group robot config" }
+      },
+      "errors": ["wecom_invalid_webhook"],
+      "implementation": "internal/channel/wecom/",
+      "audience": "Chinese enterprise (outbound only)"
+    },
+    {
+      "id": "wechat",
+      "label": "WeChat (个人微信)",
+      "inbound": "none",
+      "outbound": "official-account",
+      "public_url_required": true,
+      "setup_time_minutes": 15,
+      "capabilities": ["text"],
+      "config": {
+        "kind": { "type": "literal", "value": "wechat", "required": true },
+        "app_id": { "type": "string", "required": true },
+        "app_secret": { "type": "secret", "required": true }
+      },
+      "errors": ["wechat_token_expired", "wechat_user_not_subscribed"],
+      "implementation": "internal/channel/wechat/",
+      "audience": "Chinese individual users"
+    },
+    {
+      "id": "bridge",
+      "label": "Bridge (custom adapter)",
+      "inbound": "websocket",
+      "outbound": "websocket",
+      "public_url_required": false,
+      "setup_time_minutes": 30,
+      "capabilities": ["text", "binary", "adapter-defined"],
+      "config": {
+        "kind": { "type": "literal", "value": "bridge", "required": true },
+        "auth_token": { "type": "secret", "required": true, "note": "validates incoming WS upgrade" },
+        "schema": { "type": "string", "required": false, "note": "for adapter-specific validation" }
+      },
+      "adapters_known": ["line", "kakaotalk", "imessage-via-shell", "custom"],
+      "errors": ["bridge_auth_failed", "bridge_schema_violation"],
+      "implementation": "internal/channel/bridge/"
+    }
+  ],
+  "shared": {
+    "notify_events": [
+      { "id": "session.started", "default": false, "description": "Session just spawned and attached PTY" },
+      { "id": "session.idle", "default": true, "description": "Session has been quiet for N seconds (configurable)" },
+      { "id": "session.ended", "default": true, "description": "Session exited or was killed" },
+      { "id": "session.permission_ask", "default": true, "description": "CLI asked for permission (claude --bypass-permissions=off)" }
+    ],
+    "repeat_policies": ["never", "once-per-session", "always"],
+    "terminal_snippet": {
+      "configurable": true,
+      "max_lines_default": 10,
+      "max_lines_range": [1, 200]
+    }
+  }
+}

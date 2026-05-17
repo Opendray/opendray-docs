@@ -1,89 +1,63 @@
+---
+kind: concept
+title: Backup — quickstart
+tldr: Off by default. Set OPENDRAY_BACKUP_ENABLED=1 + OPENDRAY_BACKUP_KEY (32-byte base64). Restart → Backups page appears. Add a target → run a dump.
+status: stable
+since: v0.1.0
+topic: backup
+related: [backup/overview, backup/targets, backup/schedules]
+references:
+  capabilities: []
+---
+
 # Backup — quickstart
 
-The feature is **off by default**. Two env vars turn it on:
+> **tldr:** Off by default. Set `OPENDRAY_BACKUP_ENABLED=1` + `OPENDRAY_BACKUP_KEY` (32-byte base64). Restart → Backups page appears. Add a target → run a dump.
 
-```bash
-export OPENDRAY_BACKUP_ENABLED=1
-export OPENDRAY_BACKUP_KEY="$(openssl rand -base64 32)"
-```
+## Steps
 
-Restart opendray. The Backups page should now appear in the
-sidebar under Platform.
+| # | Action | Verify |
+|---|---|---|
+| 1 | `export OPENDRAY_BACKUP_KEY="$(openssl rand -base64 32)"` | env set |
+| 2 | `export OPENDRAY_BACKUP_ENABLED=1` | env set |
+| 3 | Point pg_dump path: `export OPENDRAY_BACKUP_PG_DUMP_PATH=/opt/homebrew/opt/postgresql@17/bin/pg_dump` | binary exists |
+| 4 | Same for pg_restore | binary exists |
+| 5 | Restart opendray | log: `INFO backup ready` |
+| 6 | Open `/backups` in admin | page appears (404 means env didn't take) |
+| 7 | Add target → Run now | dump appears as encrypted `.bin` |
 
-## Record the key fingerprint
+## What to store the key in
 
-On `/backups` the top banner shows a 16-char hex
-**Key fingerprint** — that's the first 8 bytes of
-SHA-256(derived-key). Every backup row stamps this fingerprint;
-restore later will refuse a blob whose stored fingerprint doesn't
-match the running passphrase.
+| Where | Recommendation |
+|---|---|
+| Environment | Vault / AWS Secrets / 1Password CLI → injected at startup |
+| systemd unit | `EnvironmentFile=/etc/opendray/secrets.env`(mode 0600) |
+| Docker compose | `env_file: ./.env`(`.env` is gitignored) |
+| Never | source code, command history, screen recording |
 
-**Save this fingerprint alongside your passphrase in Vaultwarden
-or your secrets manager.** If the fingerprint changes (passphrase
-rotated), prior backups become unreadable on a fresh install.
+## Restart caveat
 
-## pg_dump prerequisite
+| Reload behaviour | Backup config |
+|---|---|
+| Per `opendray reload` | not picked up — restart needed |
+| Per `opendray serve` restart | re-reads env |
 
-opendray shells out to `pg_dump`. The binary's major version must
-be ≥ your PostgreSQL server's major version. Inside an LXC / Docker
-deployment you'll typically need:
+Why: backup module initializes on boot with the key in memory; doesn't
+re-read env on reload (security: avoid leak via signal handler).
 
-```bash
-apk add postgresql<MAJOR>-client     # alpine
-apt-get install postgresql-client-<MAJOR>  # debian / ubuntu
-```
+## Verification
 
-The Backups → Status banner shows what version `pg_dump --version`
-reports; if it's empty the trigger button is disabled.
+| Check | Command |
+|---|---|
+| pg_dump version matches server | `pg_dump --version` then connect to server, check `SELECT version()` |
+| Key length | `echo -n $OPENDRAY_BACKUP_KEY \| base64 -d \| wc -c` → 32 |
+| File written | look in target storage for `<ts>.bin` files |
+| Can decrypt | Backups page → click dump → "Restore preview" (decrypts without applying) |
 
-## Take the first backup
+## Next
 
-1. Go to `/backups`.
-2. Confirm the green "ok" banner shows a key fingerprint and
-   pg_dump version.
-3. Click **Backup now** (leave "include config.toml" on).
-4. The row appears with status `running`, then `succeeded` —
-   typical small instance: 1-3 seconds.
-5. Click the **download arrow** to grab `<id>.tar.gz.enc`.
-
-## Verify the bundle (without restoring)
-
-`examples/verify-backup` ships a one-shot Go program that proves
-the bundle round-trips without needing a target server:
-
-```bash
-go run ./examples/verify-backup \
-  ~/.opendray/backups/2026/05/<id>.tar.gz.enc \
-  "<your OPENDRAY_BACKUP_KEY>" \
-  $(which pg_restore)
-```
-
-Output:
-
-```
-cipher fingerprint: e344173f214c7641
-entry: manifest.json         431 bytes
-entry: config.toml           1081 bytes
-entry: dump.bin              91693 bytes
-
-manifest fingerprint: e344173f214c7641
-backup_id: bk_t53gcylshov5fylcd2szul
-pg_version: 17.9
-version: 1
-
---- pg_restore --list output (header only) ---
-;     dbname: opendray_v2
-;     TOC Entries: 108
-…
-```
-
-The program decrypts via Cipher.Open, untars to /tmp, and runs
-`pg_restore --list` (no DB needed) to confirm the dump.bin is a
-structurally valid PostgreSQL custom-format dump.
-
-## Restore from the UI
-
-`/backups → Restore from file` accepts a bundle and runs it
-through `pg_restore` against the DSN you pick. See the
-"restore-and-import" tutorial section for the safety flow
-(typing "I understand" when restoring over opendray's own DB).
+| Topic | Read |
+|---|---|
+| Cloud target setup | [targets](./targets) |
+| Cron schedule + retention | [schedules](./schedules) |
+| Restore an old dump | [restore-and-import](./restore-and-import) |

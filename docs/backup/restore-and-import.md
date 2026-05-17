@@ -1,103 +1,75 @@
+---
+kind: capability
+title: Backup — restore (A) and import (C)
+tldr: /backups → pick a dump → Restore (pg_restore in place). /export → upload .zip.enc → Import (decrypted + merged). Both require OPENDRAY_BACKUP_KEY.
+status: stable
+since: v0.1.0
+topic: backup
+related: [backup/overview, backup/quickstart, backup/export]
+capability: [pg-restore-in-place, zip-import-merge, dry-run-preview]
+inbound: gateway
+outbound: postgres / files
+x-implementation: [internal/backup/restore.go, internal/backup/import.go]
+---
+
 # Backup — restore (A) and import (C)
 
-The reverse direction of both surfaces lives in v1. `/backups` has
-a "Restore from file" button (replays an encrypted bundle into
-PostgreSQL); `/export` grew an Import section (replays an export
-zip into the live tables).
+> **tldr:** `/backups` → pick a dump → **Restore** (pg_restore in place). `/export` → upload `.zip.enc` → **Import** (decrypted + merged). Both require `OPENDRAY_BACKUP_KEY`.
 
-## A — Restore from a `.tar.gz.enc` bundle
+## Plan A — restore from pg_dump
 
-Use this when the box died and you're rebuilding on a fresh
-opendray instance, OR when you want to roll a single instance
-back to an earlier snapshot.
+| # | Action |
+|---|---|
+| 1 | `/backups` → list of dumps from each target |
+| 2 | Pick one → **Restore preview** (decrypts, lists what's inside, doesn't apply) |
+| 3 | Review → **Restore now** |
+| 4 | opendray puts itself in maintenance mode (rejects new sessions) |
+| 5 | pg_restore runs (in `--clean` mode by default) |
+| 6 | Reconcile sessions / channels |
+| 7 | Leave maintenance mode |
 
-### Pre-requisite
+| Concern | Behaviour |
+|---|---|
+| In-flight sessions | terminated (PTYs die with old DB state) |
+| Channel connections | re-established after restore |
+| Operator notification | banner during restore + completion |
+| Roll-forward | not possible — pick a later dump |
 
-The **same** `OPENDRAY_BACKUP_KEY` that produced the bundle must
-be set on the running opendray. The manifest stamps the key
-fingerprint; restore refuses bundles whose fingerprint doesn't
-match the running cipher.
+## Plan C — import from zip-bundle
 
-`pg_restore` must be on PATH (or `cfg.backup.pg_restore_path`),
-major version ≥ the bundle's `pg_version`.
+| # | Action |
+|---|---|
+| 1 | `/export` → **Import** tab → upload `.zip.enc` |
+| 2 | opendray decrypts, validates manifest, lists scope content |
+| 3 | Pick what to import (Sessions / Memory / Channels / ...) |
+| 4 | **Merge strategy** per scope:  `replace` / `merge` / `skip-existing` |
+| 5 | **Dry run** — see exactly what will happen, no writes |
+| 6 | **Apply** — runs in transaction |
 
-### Two modes
+### Merge strategy
 
-| Target DSN | What happens | Confirmation |
+| Strategy | Behaviour |
+|---|---|
+| `replace` | drop existing rows in scope → insert from export |
+| `merge` | upsert by (kind, source-id) → keep newest |
+| `skip-existing` | only insert rows that don't already exist |
+
+## Common failure modes
+
+| Symptom | Cause | Fix |
 |---|---|---|
-| **blank** (default) | Restores into opendray's own database (DANGEROUS — drops + replays every table). | Requires typing `I understand`. |
-| **explicit DSN** | `pg_restore --dbname=<your DSN>` against an external/parallel DB. opendray's runtime DB is untouched. | None beyond admin auth. |
+| `decryption failed` | wrong `OPENDRAY_BACKUP_KEY` | use the same key that was set when dump/export was created |
+| `pg_restore_version_mismatch` | dump from PG 17, server is PG 15 | match versions |
+| `manifest_unsupported_version` | export from much-newer opendray | upgrade target opendray first |
+| `integration_keys_missing_on_target` | by design (keys not exported) | re-mint integrations on new host + paste tokens |
 
-`--clean --if-exists` is on by default (drops tables before
-replaying). Toggle off only if you're restoring into a freshly
-created empty DB.
+## Capabilities
 
-### What's restored
-
-The bundle's `dump.bin` is a `pg_dump --format=custom` of every
-opendray table — sessions, memories, integrations (with
-api_key_hash bcrypt blobs intact), audit, etc. The
-`config.toml` entry inside the tar is **not** auto-applied; if
-you want to merge it in you do that by hand.
-
-### Audit
-
-Restore is a one-shot operator action; outcome lives in slog
-(see `/settings/server` log viewer) plus the `pg_restore_output`
-field in the API response. No DB row is created — restoring the
-DB would have erased it.
-
-## C — Import a `.zip` export bundle
-
-Use this to migrate memories / integrations / custom_tasks from
-one opendray to another, or to roll back a single logical
-section without touching the rest of the database.
-
-### Conflict policy v1
-
-| Entity | Conflict key | Behaviour on conflict |
-|---|---|---|
-| Memories | `id` | Skipped (existing row wins). |
-| Integrations | `id` and `route_prefix` (UNIQUE) | Skipped. |
-| Custom tasks | `id` | Skipped. |
-
-The Import row's `counts` field reports the breakdown
-(created / skipped / failed) per entity.
-
-### Memories: the embedder caveat
-
-Imported memories are written with
-`embedder = 'imported_v1'` and a NULL embedding column.
-Search() ignores them until you trigger a re-embed pass.
-
-After import:
-
-1. Go to `/memory`.
-2. Open the Maintenance tab (top right).
-3. Click **Re-embed all under current embedder**.
-
-Re-embedding uses whatever embedder the receiving opendray runs
-(BM25 / HTTP / LocalONNX) — there's no requirement that the
-sending instance used the same one.
-
-### Integrations: the auth caveat
-
-Bundles never carry plaintext API keys (opendray stores only
-bcrypt hashes). On import, integration rows arrive with:
-
-- `enabled = false` (so they can't be reached even by accident)
-- `api_key_hash = "imported:no-plaintext-key-rotate-before-use"`
-  (a non-bcrypt sentinel — no plaintext will ever validate
-  against it)
-
-Before the integration can authenticate again, **rotate the key**
-from the integrations page. opendray returns the new plaintext
-once; record it in your secrets manager and configure the caller.
-
-### Audit trail
-
-Every import attempt — success or failure — writes a row to the
-`imports` table. The History panel on `/export` shows the last
-20 attempts with per-entity counts. Failed sections don't abort
-the whole import; the row's `error` field captures the first
-section that failed and you can scroll the slog for details.
+| feature | supported |
+|---|---|
+| Restore in place (Plan A) | ✓ |
+| Cross-host import (Plan C) | ✓ |
+| Dry-run preview (both) | ✓ |
+| Partial import per scope | ✓ Plan C only |
+| Roll-back after restore | ✗ — pick earlier dump |
+| Online restore (no maintenance) | ✗ |

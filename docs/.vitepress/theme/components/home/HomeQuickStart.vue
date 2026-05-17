@@ -72,69 +72,106 @@ const { lang } = useData()
 const isZh = computed(() => lang.value?.startsWith('zh'))
 
 const t = computed(() => isZh.value ? {
-  eyebrow: '60 秒上手',
-  title: '一行命令,跑起来。',
-  sub: '不需要 Docker compose 文件,不需要 K8s manifest。一条 shell 命令就能拉起一个全功能 opendray 实例。',
+  eyebrow: '5 分钟跑起来',
+  title: '克隆 → 起 DB → 跑 → 访问后台。',
+  sub: 'opendray v1.0 是一个 Go 二进制(内嵌 web bundle)+ 一个外置 Postgres。下面四种部署路径都有真实命令,默认端口 8770,后台在 /admin/。',
   copy: '复制', copied: '已复制',
-  step1Title: '安装', step1Text: '一行 install 脚本',
-  step2Title: '启动', step2Text: 'opendray run 起服务',
-  step3Title: '接入频道', step3Text: '在 UI 里贴 token',
+  step1Title: '起 DB', step1Text: 'docker compose 起本地 Postgres',
+  step2Title: '配置', step2Text: 'cp config.example.toml',
+  step3Title: '跑起来', step3Text: 'opendray serve → :8770/admin/',
 } : {
-  eyebrow: 'Up in 60 seconds',
-  title: 'One command. Done.',
-  sub: 'No docker-compose to write. No K8s manifests to chew through. One shell command and you have a full opendray instance.',
+  eyebrow: 'Running in 5 minutes',
+  title: 'Clone → DB → run → open the admin.',
+  sub: 'opendray v1.0 ships as a single Go binary (with the web bundle embedded) plus an external Postgres. Four real deployment paths below — default port 8770, admin lives at /admin/.',
   copy: 'Copy', copied: 'Copied',
-  step1Title: 'Install', step1Text: 'one-line installer',
-  step2Title: 'Start', step2Text: 'opendray run',
-  step3Title: 'Wire a channel', step3Text: 'paste tokens in UI',
+  step1Title: 'Start DB', step1Text: 'docker compose for local Postgres',
+  step2Title: 'Configure', step2Text: 'cp config.example.toml',
+  step3Title: 'Run it', step3Text: 'opendray serve → :8770/admin/',
 })
 
 const options = computed(() => [
   {
-    id: 'sh', icon: '⚡',
-    label: 'curl', file: 'install.sh',
-    cmd: `# Install opendray (linux / macos)
-curl -fsSL https://get.opendray.dev | sh
+    id: 'src', icon: '🛠️',
+    label: 'From source', file: '~/opendray-v2 $',
+    cmd: `# Real 5-min path from docs/quickstart.md
+git clone https://github.com/Opendray/opendray_v2.git
+cd opendray_v2
 
-# Start the server (defaults to :8651)
-opendray run
+# 1. Start the bundled Postgres
+docker compose -f docker-compose.test.yml up -d
 
-# Open the admin in your browser
-open http://localhost:8651`,
+# 2. Local config (gitignored — set [admin].password)
+cp config.example.toml config.toml
+
+# 3. Build the web bundle so the binary embeds it
+cd app/web && pnpm install --frozen-lockfile && pnpm build && cd ../..
+
+# 4. Apply schema (idempotent)
+go run ./cmd/opendray migrate -config config.toml
+
+# 5. Run the gateway
+go run ./cmd/opendray serve -config config.toml
+# → REST + WS :  http://127.0.0.1:8770/api/v1/...
+# → Web admin :  http://127.0.0.1:8770/admin/`,
   },
   {
     id: 'docker', icon: '🐳',
-    label: 'Docker', file: 'docker-run',
-    cmd: `# Pull and run (data persists in ./opendray-data)
-docker run -d \\
-  --name opendray \\
-  -p 8651:8651 \\
-  -v $PWD/opendray-data:/data \\
-  ghcr.io/opendray/opendray:latest
+    label: 'Docker (built locally)', file: '~/opendray-v2 $',
+    cmd: `# Build the image (multi-stage: web + go + distroless runtime)
+git clone https://github.com/Opendray/opendray_v2.git && cd opendray_v2
+docker build -t opendray:v1 .
 
-# Tail logs
+# Bring your own Postgres (any v15+, vector ext optional)
+docker run -d --name opendray-pg \\
+  -e POSTGRES_USER=opendray -e POSTGRES_PASSWORD=opendray \\
+  -e POSTGRES_DB=opendray -p 127.0.0.1:5432:5432 \\
+  postgres:17-alpine
+
+# Run opendray pointing at it
+docker run -d --name opendray -p 8770:8770 \\
+  -e OPENDRAY_DATABASE_URL='postgres://opendray:opendray@host.docker.internal:5432/opendray?sslmode=disable' \\
+  -e OPENDRAY_ADMIN_PASSWORD='change-me' \\
+  opendray:v1 serve
+
+# Tail
 docker logs -f opendray`,
   },
   {
     id: 'lxc', icon: '📦',
-    label: 'LXC / VM', file: 'install.sh',
-    cmd: `# Inside a fresh Debian/Ubuntu LXC or VM
-apt-get update && apt-get install -y curl
-curl -fsSL https://get.opendray.dev | sh
+    label: 'LXC (Proxmox)', file: 'pct exec',
+    cmd: `# Inside a fresh Debian 12 / Ubuntu 24.04 LXC
+apt update && apt install -y postgresql-17 git golang-1.25 nodejs npm
+corepack enable && corepack prepare pnpm@10 --activate
 
-# Optional: persist as a systemd service
-opendray service install
-systemctl enable --now opendray`,
+# Build + install
+git clone https://github.com/Opendray/opendray_v2.git /opt/opendray
+cd /opt/opendray
+make build       # → ./bin/opendray (or 'go build ./cmd/opendray')
+
+# Configure (edit DB URL + admin password)
+cp config.example.toml /etc/opendray/config.toml
+
+# Systemd service template lives at deploy/systemd/opendray.service
+cp deploy/systemd/opendray.service /etc/systemd/system/
+systemctl enable --now opendray
+journalctl -fu opendray`,
   },
   {
-    id: 'src', icon: '🛠️',
-    label: 'From source', file: 'build',
-    cmd: `# Requires Go 1.22+ and pnpm
-git clone https://github.com/opendray/opendray
-cd opendray
+    id: 'backup', icon: '🔐',
+    label: 'Add encrypted backup', file: 'env',
+    cmd: `# Optional: enable encrypted DB dumps + zip-bundle exports
+# (Backups page appears in the admin sidebar.)
 
-make build      # → ./bin/opendray
-./bin/opendray run`,
+# Master passphrase — env only, never write into config.toml
+export OPENDRAY_BACKUP_KEY="$(openssl rand -base64 32)"
+export OPENDRAY_BACKUP_ENABLED=1
+
+# pg_dump / pg_restore must match the server's major version. On
+# Apple Silicon dev pointing at a PG17 server:
+export OPENDRAY_BACKUP_PG_DUMP_PATH=/opt/homebrew/opt/postgresql@17/bin/pg_dump
+export OPENDRAY_BACKUP_PG_RESTORE_PATH=/opt/homebrew/opt/postgresql@17/bin/pg_restore
+
+# Restart opendray — Backups (/backups) + Exports (/export) light up.`,
   },
 ])
 

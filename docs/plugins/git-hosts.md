@@ -1,84 +1,79 @@
-# Git hosts
+---
+kind: capability
+title: Git host adapters
+tldr: GitHub / Gitea / GitLab integrations — PAT or OAuth. Used by Notes vault sync, Sessions Git tab, PR commands. Per-host scope. Stored encrypted at rest.
+status: stable
+since: v0.1.0
+topic: plugins
+related: [plugins/overview, sessions/git-workflow, notes/vault-git-sync]
+capability: [github, gitea, gitlab, pat-auth, oauth-auth, encrypted-storage]
+inbound: settings
+outbound: git
+x-implementation: [internal/git/adapter/]
+---
 
-Credentials for remote git pushes. The Notes vault sync uses
-these tokens to push the vault repo over HTTPS without prompting
-for credentials. Other parts of opendray that need to clone or
-push (custom integrations) reuse the same registry.
+# Git host adapters
 
-## Provider flavours
+> **tldr:** GitHub / Gitea / GitLab integrations — PAT or OAuth. Used by Notes vault sync, Sessions Git tab, PR commands. Per-host scope. Stored encrypted at rest.
 
-| Provider | Auth flavour |
+## Supported hosts
+
+| Host | Auth methods | API base |
+|---|---|---|
+| GitHub | PAT (recommended), OAuth app | `https://api.github.com` |
+| Gitea | PAT, OAuth | self-hosted URL |
+| GitLab | PAT, OAuth | `https://gitlab.com` or self-hosted |
+| Bitbucket | ✗ not supported | — |
+
+## Register
+
+| # | Action |
 |---|---|
-| GitHub | Personal Access Token (classic or fine-grained) |
-| GitLab | Personal Access Token with `write_repository` scope |
-| Gitea / Forgejo | application token with repo-write |
-| Bitbucket | App password with repo-write |
-| Custom (SSH-only) | SSH key trusted by the host's `~/.ssh/known_hosts` — no token needed; this page is for HTTPS auth only |
+| 1 | Settings → Git hosts → **+ Add host** |
+| 2 | Pick host kind + name (`my-github`, `work-gitea`) |
+| 3 | Method: PAT or OAuth |
+| 4 | For PAT: paste token; for OAuth: complete the dance |
+| 5 | Pick scopes (see below) |
 
-## Adding a host
+## Required PAT scopes
 
-Plugins → **Git hosts** → **Add host**.
-
-| Field | Purpose |
+| Host | Scopes |
 |---|---|
-| **Provider** | dropdown picking known patterns (sets default URL prefix) |
-| **Display name** | shown in the list |
-| **HTTPS host** | e.g. `github.com`, `gitlab.com`, `gitea.example.com` |
-| **Username** | your username on the platform |
-| **Token** | the PAT / app token / app password |
+| GitHub | `repo` (private) or `public_repo` (public only) |
+| Gitea | `read:repo`, `write:repo` |
+| GitLab | `api` (full) or `read_repository` + `write_repository` |
 
-The token writes to the same encrypted secrets vault as
-[MCP secrets](#plugins-mcp). You can't read the plaintext back
-through the UI; rotate by saving a new value.
+## Stored encrypted
 
-## How tokens get used
+| Where | What |
+|---|---|
+| DB column | `git_hosts.token_encrypted` (AES-GCM, key from `OPENDRAY_SECRETS_KEY`) |
+| At runtime | decrypted to memory only when used; never logged |
+| Backup | included in encrypted backup (see [backup/overview](../backup/overview)) |
 
-The vault syncer (`internal/vaultgit/syncer.go`) when invoking
-git push/pull:
+## Used by
 
-1. Looks up the remote URL.
-2. Matches the host portion against the registered git hosts.
-3. If found, prepends `https://<user>:<token>@<host>/...` to
-   the URL for the duration of that operation.
-4. Token never lands in `~/.opendray/vault/.git/config` — only
-   the bare URL does, so the repo can be cloned by a different
-   host without leaking credentials.
+| Feature | How |
+|---|---|
+| Notes vault sync | pushes to host using configured PAT |
+| Sessions Git tab — Push | same |
+| Sessions Git tab — PR list/create/merge | host API via configured token |
+| Sessions Git tab — Checks polling | host commit-status API |
 
-## Listing repos (read-only feature)
+## Capabilities
 
-Plugins → **Git hosts** → click a host → **List repos**.
+| feature | supported |
+|---|---|
+| Multiple hosts | ✓ (e.g. one work, one personal) |
+| OAuth refresh | ✓ (auto on expiry) |
+| Per-vault host override | ✓ |
+| Token expiry warning | ✓ (UI banner ≤ 7d) |
+| Org-level GitHub apps | ✗ (PAT or user OAuth only) |
 
-opendray hits the host's API (`/user/repos` for GitHub, etc.)
-with the configured token and shows your accessible repositories.
-Useful sanity check ("am I auth'd?") and the seed for *Clone
-this repo as a new session cwd* in future versions.
+## Errors
 
-## Token rotation
-
-Each host card shows the **last used** timestamp. When that's
-old (90+ days), GitHub-style tokens may have been auto-revoked
-on the platform side. The vault syncer surfaces 401s by flipping
-the host card status to red and emitting a notification on the
-event bus (`vaultgit.host_auth_failed`).
-
-To rotate:
-
-1. Generate a new token on the platform.
-2. Plugins → **Git hosts** → click the host → **Rotate token**.
-3. Save.
-
-Old token stays in the encrypted vault until next sync; first
-successful sync with the new value clears the old.
-
-## SSH-only setups
-
-If you prefer SSH (no tokens at all):
-
-- Configure the host's SSH key normally (`~/.ssh/config` + agent).
-- Use SSH-format remotes (`git@github.com:me/vault.git`).
-- Skip the Git hosts page entirely — opendray's syncer shells
-  out to system `git`, which uses your SSH agent.
-
-The Git hosts page is **specifically for HTTPS-with-token**
-setups, which are friendlier on hosts where SSH agents are a
-pain (Docker containers, Windows, ephemeral cloud VMs).
+| code | when | fix |
+|---|---|---|
+| `git_host_auth_failed` | bad / expired token | re-add PAT or re-run OAuth |
+| `git_host_insufficient_scope` | PAT missing required scope | re-mint with proper scopes |
+| `git_host_rate_limited` | API quota | wait; respect `X-RateLimit-Reset` |

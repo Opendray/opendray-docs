@@ -1,89 +1,63 @@
+---
+kind: concept
+title: Consuming opendray — overview
+tldr: Third-party-dev guide for building apps that call opendray. Register integration → scoped key → REST/WS API. Replaces per-token API billing with one Claude Pro subscription.
+status: stable
+since: v0.1.0
+topic: consuming
+related:
+  - consuming/quickstart
+  - consuming/authentication
+  - consuming/rest-api
+  - consuming/websocket-events
+  - consuming/scopes
+  - consuming/key-rotation
+  - consuming/typescript-sdk
+  - consuming/error-handling
+  - integrations/overview
+references:
+  capabilities: [integrations]
+---
+
 # Consuming opendray — overview
 
-This group is for **third-party developers** building applications
-that call opendray's API. If you're an opendray operator wondering
-how to manage integrations from the admin UI, see the
-[Integrations](#integrations-overview) group instead.
+> **tldr:** Third-party-dev guide for building apps that call opendray. Register integration → scoped key → REST/WS API. Replaces per-token API billing with one Claude Pro subscription.
 
-## Mental model
+## Audience
 
-opendray exposes a single, dual-auth REST + WebSocket surface under
-`/api/v1/...`:
-
-```
-                                ┌──────────────────────────┐
-                                │     opendray gateway     │
-                                │                          │
-   Your app ──── HTTPS/WS ────► │  /api/v1/sessions       │
-   (Bearer key)                 │  /api/v1/channels       │
-                                │  /api/v1/integrations   │
-                                │  /api/v1/integrations/  │
-                                │      _events    (WS)     │
-                                └──────────────────────────┘
-                                          │
-                                          ▼
-                                ┌──────────────────────────┐
-                                │   Backed by:             │
-                                │   · PTYs (claude/codex/  │
-                                │     gemini/shell)        │
-                                │   · channels (Telegram,  │
-                                │     Slack, Discord, …)   │
-                                │   · postgres (audit log) │
-                                └──────────────────────────┘
-```
-
-Your app authenticates once, then reads or drives whichever surface
-its **scope** allows.
-
-## What you can do
-
-Two complementary modes — pick whichever (or both) fits:
-
-### 1. Consumer mode
-
-Your app **calls** opendray's API. Examples:
-
-- A web dashboard that lists running Claude/Codex/Gemini sessions
-- A Slack bot that receives session-idle events and pings the
-  operator
-- A monitoring service that subscribes to the event bus and pushes
-  metrics to Grafana
-- A CLI utility that spawns headless agent sessions for batch jobs
-
-**Auth**: integration API key as Bearer token.
-**Network**: outbound HTTPS from your app to opendray.
-
-### 2. Reverse-proxy mode
-
-Your app **exposes** an HTTP service that opendray fronts. Other
-opendray consumers reach it through `/api/v1/proxy/<your-prefix>/*`.
-Examples:
-
-- A custom Anthropic-API tracker
-- A receipt-scanning service that takes uploaded files
-- A webhook receiver that re-publishes events on opendray's bus
-
-**Auth**: opendray verifies the caller's bearer; your service trusts
-the gateway and just serves HTTP.
-**Network**: opendray initiates inbound HTTP to your service.
-
-A single integration row can be both at once (set `base_url` +
-`route_prefix` to enable proxy; the same `api_key` lets the same
-app consume too).
-
-## What's in this group
-
-| Topic | Section |
+| Group | What |
 |---|---|
-| 5-minute curl walkthrough | [Quickstart](#consuming-quickstart) |
-| Bearer-token plumbing | [Authentication](#consuming-authentication) |
-| REST endpoint reference | [REST API](#consuming-rest-api) |
-| WebSocket events | [Event subscriptions](#consuming-websocket-events) |
-| Scope catalogue | [Scopes reference](#consuming-scopes) |
-| Persisting + recovering keys | [Key rotation](#consuming-key-rotation) |
-| TypeScript starter | [TypeScript SDK](#consuming-typescript-sdk) |
-| Error responses + retries | [Error handling](#consuming-error-handling) |
+| You | building an app (pettracker, materialscout, your-next-app) |
+| opendray | already running on your server |
+| Goal | your app spawns Claude sessions / sends channel messages / queries memory through opendray's API |
+| Cost benefit | one $20/mo Claude Pro serves all your apps |
 
-The whole thing maps onto the
-[`examples/integrations/demo-client/`](https://github.com/Opendray/opendray_v2/tree/main/examples/integrations/demo-client)
-reference — copy that and edit, or read it alongside.
+## What you'll read in order
+
+| # | Topic | Why first |
+|---|---|---|
+| 1 | [Quickstart](./quickstart) | 5-min smoke test — register integration + curl test |
+| 2 | [Authentication](./authentication) | bearer / scope vocab |
+| 3 | [REST API](./rest-api) | per-endpoint reference |
+| 4 | [WebSocket events](./websocket-events) | when you need push, not poll |
+| 5 | [Scopes](./scopes) | enumerate every scope id |
+| 6 | [Key rotation](./key-rotation) | zero-downtime key swap |
+| 7 | [TypeScript SDK](./typescript-sdk) | typed client |
+| 8 | [Error handling](./error-handling) | the `{code, message, hint}` envelope |
+
+## Differences from integrations-page docs
+
+| `/integrations/*` | `/consuming/*` |
+|---|---|
+| operator (you self-hosting) registering an integration | developer (third-party) writing the integration |
+| reverse proxy, call log, events WS internals | how to call the API |
+| `/capabilities/integrations.json` is canonical | `/openapi.yaml` is canonical |
+
+## Machine-readable artifacts for AI agents
+
+| Artifact | Use |
+|---|---|
+| [/openapi.yaml](/openapi.yaml) | feed into your codegen of choice |
+| [/capabilities/integrations.json](/capabilities/integrations.json) | scope vocabulary |
+| [/llms.txt](/llms.txt) | index of every doc page |
+| [/manifest.json](/manifest.json) | one-shot site summary |

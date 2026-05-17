@@ -1,0 +1,86 @@
+{
+  "$schema": "https://docs.opendray.dev/capabilities/_meta.schema.json",
+  "subsystem": "memory",
+  "version": "1.0.0",
+  "stability": "stable",
+  "description": "Cross-CLI project memory layer. Auto-capture from sessions, summarized in background, retrieved at session start.",
+  "since": "v0.1.0",
+  "implementation": "internal/memory/",
+  "scopes": [
+    {
+      "id": "session",
+      "key": "session_id",
+      "lifetime": "until session ends",
+      "shared_across_cli": false,
+      "purpose": "ephemeral session facts that don't outlive the session"
+    },
+    {
+      "id": "project",
+      "key": "cwd (canonical absolute path)",
+      "lifetime": "permanent until explicitly purged",
+      "shared_across_cli": true,
+      "purpose": "project-specific knowledge — survives CLI switches in the same cwd"
+    },
+    {
+      "id": "global",
+      "key": "(none — user-wide)",
+      "lifetime": "permanent until explicitly purged",
+      "shared_across_cli": true,
+      "purpose": "user-wide preferences, style choices"
+    }
+  ],
+  "embedders": [
+    {
+      "id": "bm25",
+      "default": true,
+      "external_service_required": false,
+      "embedding_dim": null,
+      "implementation": "internal/memory/embedder/bm25/",
+      "note": "Pure Go, no external service. Default. Lower recall but zero ops cost."
+    },
+    {
+      "id": "openai-compatible-http",
+      "external_service_required": true,
+      "embedding_dim": "depends on model",
+      "compatible_with": ["ollama", "lm-studio", "openai", "localai", "vllm"],
+      "config": {
+        "base_url": { "type": "url", "required": true, "example": "http://localhost:11434/v1" },
+        "model": { "type": "string", "required": true, "example": "nomic-embed-text" },
+        "api_key": { "type": "secret", "required": false }
+      },
+      "implementation": "internal/memory/embedder/openai_compat/"
+    },
+    {
+      "id": "local-onnx",
+      "external_service_required": false,
+      "embedding_dim": 1024,
+      "model": "bge-m3",
+      "build_tag": "local_onnx",
+      "implementation": "internal/memory/embedder/onnx/",
+      "note": "Behind build tag — requires CGO; embeds ONNX runtime."
+    }
+  ],
+  "capture": {
+    "implementation": "internal/memory/capture/",
+    "triggers": ["session.ended", "session.idle", "explicit (claude /memory-write)"],
+    "rules": "user-configurable per provider"
+  },
+  "summarization": {
+    "implementation": "internal/memory/summarizer/",
+    "workers": ["anthropic", "openai", "ollama"],
+    "policy": "compact when raw memory > 50 entries per scope"
+  },
+  "retrieval": {
+    "implementation": "internal/memory/injector/",
+    "profiles": ["dense", "sparse"],
+    "default_top_k": 5
+  },
+  "conflict_detection": {
+    "implementation": "internal/memconflict/",
+    "policy": "newer-wins by default; user can override"
+  },
+  "cleanup": {
+    "implementation": "internal/memory/cleaner/",
+    "triggers": ["stale", "superseded", "conflict-detected", "manual"]
+  }
+}

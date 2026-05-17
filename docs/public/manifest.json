@@ -1,0 +1,84 @@
+{
+  "$schema": "https://docs.opendray.dev/manifest.schema.json",
+  "name": "opendray",
+  "tagline": "Let your AI coding CLI follow you — and let every app you build use it too.",
+  "version": "1.0.0",
+  "status": "stable",
+  "license": "MIT",
+  "repository": "https://github.com/Opendray/opendray_v2",
+  "homepage": "https://docs.opendray.dev",
+  "categories": [
+    "personal-ai-infrastructure",
+    "cli-multiplexer",
+    "integration-gateway",
+    "messaging-bridge",
+    "memory-store"
+  ],
+  "audiences": ["self-hoster", "indie-dev", "small-team", "ai-agent-consumer"],
+  "anti_audiences": ["enterprise-team", "saas-buyer", "multi-tenant-operator"],
+  "deployment": {
+    "form": "single-go-binary",
+    "size_mb": 50,
+    "targets": ["lxc", "docker", "synology", "raspberry-pi", "bare-metal-linux", "macos"],
+    "external_deps": ["postgresql >= 15 (vector ext optional)"],
+    "default_port": 8770,
+    "admin_path": "/admin/"
+  },
+  "subsystems": [
+    { "id": "sessions",     "schema": "/capabilities/sessions.json" },
+    { "id": "channels",     "schema": "/capabilities/channels.json" },
+    { "id": "providers",    "schema": "/capabilities/providers.json" },
+    { "id": "memory",       "schema": "/capabilities/memory.json" },
+    { "id": "integrations", "schema": "/capabilities/integrations.json" }
+  ],
+  "api": {
+    "openapi": "/openapi.yaml",
+    "base_url_pattern": "{scheme}://{host}/api/v1",
+    "websocket_paths": [
+      "/api/v1/sessions/{id}/stream",
+      "/api/v1/integrations/_events"
+    ],
+    "auth_schemes": ["bearer-integration-key", "bearer-admin-token"],
+    "rate_limit_headers": ["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"]
+  },
+  "ai_consumption": {
+    "llms_txt": "/llms.txt",
+    "llms_full_txt": "/llms-full.txt",
+    "mcp_manifest": "/mcp-manifest.json",
+    "page_frontmatter_schema": "https://docs.opendray.dev/AI-FIRST-SCHEMA.md",
+    "preferred_pattern": "Read /llms.txt for index → drill into /capabilities/*.json for unambiguous capability discovery → use /openapi.yaml when calling the API."
+  },
+  "differentiators": [
+    {
+      "id": "cost-arbitrage",
+      "claim": "One $20/mo Claude Pro subscription serves an entire personal-app ecosystem via the integration gateway.",
+      "vs": "per-token API billing per app",
+      "evidence": "/capabilities/integrations.json"
+    },
+    {
+      "id": "cross-cli-memory",
+      "claim": "Project memory persists across CLI switches (Claude → Codex → Gemini) within the same cwd.",
+      "vs": "each CLI an isolated black box",
+      "evidence": "/capabilities/memory.json"
+    },
+    {
+      "id": "chinese-platforms-first-class",
+      "claim": "Feishu / DingTalk / WeCom / WeChat implemented at the same depth as Telegram / Slack / Discord.",
+      "vs": "Telegram-only or community-contributed",
+      "evidence": "/capabilities/channels.json"
+    },
+    {
+      "id": "personal-infrastructure",
+      "claim": "Single Go binary, runs on home LXC / Docker / Synology / Pi, no k8s / no SaaS subscription stack.",
+      "vs": "enterprise multi-tenant platforms",
+      "evidence": "/openapi.yaml"
+    }
+  ],
+  "non_goals": [
+    "Direct LLM API calls (the CLI does that work)",
+    "Generic agent framework (the CLI is the agent)",
+    "Plugin marketplace, store, signing infrastructure",
+    "Multi-tenant SaaS, billing, payments",
+    "Enterprise RBAC beyond admin / integration scopes"
+  ]
+}

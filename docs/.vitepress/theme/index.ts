@@ -6,11 +6,13 @@ import './style.css'
 
 // home-page sections
 import HomeHero from './components/home/HomeHero.vue'
+import HomeWhy from './components/home/HomeWhy.vue'
 import HomeQuickStart from './components/home/HomeQuickStart.vue'
 import HomeChannels from './components/home/HomeChannels.vue'
 import HomeFeatures from './components/home/HomeFeatures.vue'
 import HomeShowcase from './components/home/HomeShowcase.vue'
 import HomeStats from './components/home/HomeStats.vue'
+import HomeTour from './components/home/HomeTour.vue'
 import HomeFooterCta from './components/home/HomeFooterCta.vue'
 
 // content components (used inside markdown)
@@ -44,11 +46,13 @@ const theme: Theme = {
   enhanceApp({ app }) {
     // home sections
     app.component('HomeHero', HomeHero)
+    app.component('HomeWhy', HomeWhy)
     app.component('HomeQuickStart', HomeQuickStart)
     app.component('HomeChannels', HomeChannels)
     app.component('HomeFeatures', HomeFeatures)
     app.component('HomeShowcase', HomeShowcase)
     app.component('HomeStats', HomeStats)
+    app.component('HomeTour', HomeTour)
     app.component('HomeFooterCta', HomeFooterCta)
 
     // content

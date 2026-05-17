@@ -1,95 +1,78 @@
+---
+kind: capability
+title: Scopes reference
+tldr: Enumerate every scope id, route mapping, and pattern (read / write / send / subscribe). Source of truth — /capabilities/integrations.json.
+status: stable
+since: v0.1.0
+topic: consuming
+related: [consuming/authentication, integrations/auth-model]
+capability:
+  - session:read
+  - session:write
+  - channel:read
+  - channel:send
+  - channel:write
+  - memory:read
+  - memory:write
+  - integration:read
+  - integration:write
+  - event:subscribe:session.*
+  - event:subscribe:channel.*
+  - event:subscribe:memory.*
+x-implementation:
+  - internal/auth/scope.go
+  - docs/public/capabilities/integrations.json
+---
+
 # Scopes reference
 
-Every integration has a list of scopes attached to its API key.
-Scopes are claim-style strings; the gateway middleware checks them
-on every request and returns 403 if the requested endpoint isn't
-in the integration's set.
+> **tldr:** Enumerate every scope id, route mapping, and pattern (read / write / send / subscribe). Source of truth — [/capabilities/integrations.json](/capabilities/integrations.json).
 
-The set is fixed at registration time and editable through the
-admin UI (Integrations → Edit → Scopes). Live API keys see the
-updated scope set on the **next** request after the change — no
-restart, no key rotation.
+## Scope catalogue
 
-## Choosing scopes for your app
+| Scope | Lets the key | Routes |
+|---|---|---|
+| `session:read` | list / get / tail | `GET /sessions`, `GET /sessions/{id}`, `GET /sessions/{id}/events` |
+| `session:write` | spawn / input / terminate | `POST /sessions`, `POST /sessions/{id}/input`, `DELETE /sessions/{id}` |
+| `channel:read` | list channels | `GET /channels` |
+| `channel:write` | register / edit channels | `POST /channels`, `PUT /channels/{id}` |
+| `channel:send` | push message via channel | `POST /channels/{id}/send` |
+| `memory:read` | query | `POST /memory/recall`, `POST /memory/list` |
+| `memory:write` | write project / global | `POST /memory/store` |
+| `integration:read` | list / get integrations | `GET /integrations`, `GET /integrations/{id}` |
+| `integration:write` | register / rotate / disable | `POST /integrations`, `POST /integrations/{id}/rotate` |
+| `event:subscribe:session.*` | WS subscribe | session topics |
+| `event:subscribe:channel.*` | WS subscribe | channel topics |
+| `event:subscribe:memory.*` | WS subscribe | memory topics |
+| `event:subscribe:notification.*` | WS subscribe | notification topics |
+| `event:subscribe:*` | WS subscribe | all event topics |
 
-The principle is **least privilege**. Start with the read-only
-subset that proves your app works, then widen on demand. opendray's
-default scopes for a freshly-registered row are:
+## Naming patterns
 
-```
-session:read
-event:subscribe:session.*
-```
-
-That's enough for a dashboard or monitor; not enough to drive a
-session.
-
-## Catalogue
-
-### Sessions
-
-| Scope | Endpoints unlocked |
+| Pattern | Meaning |
 |---|---|
-| `session:read` | `GET /sessions`, `/sessions/{id}`, `/sessions/{id}/buffer`, `/sessions/{id}/stream` (WS), `/sessions/{id}/history` |
-| `session:create` | `POST /sessions`, `POST /sessions/{id}/start`, `POST /sessions/{id}/stop`, `DELETE /sessions/{id}`, `PATCH /sessions/{id}/claude-account` |
-| `session:input` | `POST /sessions/{id}/input`, `POST /sessions/{id}/resize` |
+| `<resource>:read` | list + get-by-id |
+| `<resource>:write` | create / update / delete |
+| `<resource>:send` | side-effect operations (channel send, etc.) |
+| `event:subscribe:<topic-prefix>` | WS subscription topic filter |
 
-Common combos:
+Wildcards inside `event:subscribe:` follow the topic pattern.
+Wildcards inside `<resource>:*` aren't supported — list each scope.
 
-- **Dashboard** → `session:read` only.
-- **Bot that drives Claude** → `session:read` + `session:create` +
-  `session:input`.
-- **Read-only monitor** → `session:read` + `event:subscribe:session.*`.
+## Minimal sets per use case
 
-### Channels
-
-| Scope | Endpoints unlocked |
+| Use case | Minimal scopes |
 |---|---|
-| `channel:send` | `POST /channels/{id}/notify`, `/channels/{id}/send` |
-| `channel:receive` | `POST /channels/{id}/inbound` (webhook) |
+| dashboard (read-only) | `session:read`, `channel:read`, `memory:read`, `event:subscribe:*` |
+| bot that spawns + replies | `session:read`, `session:write`, `event:subscribe:session.*` |
+| notification fan-out | `channel:read`, `channel:send` |
+| memory enrichment service | `memory:read`, `memory:write` |
+| meta-tooling (rotate keys, etc.) | `integration:read`, `integration:write` |
 
-Channel CRUD (registration, deletion) is admin-only — your app
-can't manage channels via these scopes.
+## Errors
 
-### Event subscriptions
-
-These are gates on the WebSocket at `/integrations/_events`. Each
-topic family has its own scope:
-
-| Scope | Topics |
-|---|---|
-| `event:subscribe:session.*` | session.started, .idle, .activity, .stopped, .ended, .restarted |
-| `event:subscribe:channel.*` | channel.message_sent, .message_forwarded, .command_received |
-| `event:subscribe:integration.*` | integration.registered, .health_changed, .key_rotated |
-
-You can also subscribe to a single specific topic by asking for the
-exact scope, e.g. `event:subscribe:session.idle` — but in practice
-the wildcard variants are easier and still narrow enough.
-
-### Misc
-
-| Scope | Endpoints unlocked |
-|---|---|
-| `provider:read` | `GET /catalog`, `/catalog/providers`, `/catalog/providers/{id}` |
-
-Useful when your app wants to know which agent CLIs the gateway
-host has available before it tries to spawn one.
-
-## What scopes don't cover
-
-- **Admin endpoints** — `/admin/settings`, `/admin/restart`,
-  `/integrations` (CRUD), `/auth/login` are gated by **admin
-  identity**, not scopes. There's no scope that lets an
-  integration impersonate the admin.
-- **Reverse-proxy targets** — once your integration is reachable
-  at `/api/v1/proxy/<prefix>/*`, callers reach it with **their own**
-  bearer (admin or any integration). opendray doesn't do per-target
-  scope filtering on the proxy path; your downstream service is
-  responsible for whatever finer-grained authz it needs.
-
-## Auditing
-
-Every scope-checked request is logged in the integration call log
-(see [Activity → Call log](#integrations-call-log)) with the
-attributed integration_id. If you suspect a stolen key, search
-for unexpected endpoints and rotate.
+| code | http | meaning |
+|---|---|---|
+| `insufficient_scope` | 403 | route requires a scope your key doesn't have |
+| `scope_invalid` | 400 | registered an unknown scope at mint time |
+| `scope_pattern_invalid` | 400 | `event:subscribe:` pattern malformed |

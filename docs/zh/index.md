@@ -1,7 +1,7 @@
 ---
 layout: page
-title: opendray — 多 CLI 控制网关
-description: 把 Claude Code、Codex、Gemini CLI 会话接入 Telegram、Slack、Discord、飞书、钉钉、企业微信。自托管、本地优先、完全开源。
+title: opendray — AI 编程 CLI 的自托管控制网关
+description: 在家里的服务器上跑 Claude Code、Codex、Gemini CLI;从网页、手机、Telegram、Slack、飞书、钉钉、企业微信驱动它们。自托管、本地优先、完全开源。
 sidebar: false
 aside: false
 editLink: false
@@ -11,9 +11,11 @@ next: false
 ---
 
 <HomeHero />
-<HomeStats />
+<HomeWhy />
+<HomeTour />
 <HomeQuickStart />
-<HomeChannels />
 <HomeFeatures />
+<HomeChannels />
 <HomeShowcase />
+<HomeStats />
 <HomeFooterCta />

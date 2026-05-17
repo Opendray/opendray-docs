@@ -1,0 +1,51 @@
+{
+  "$schema": "https://docs.opendray.dev/capabilities/_meta.schema.json",
+  "subsystem": "sessions",
+  "version": "1.0.0",
+  "stability": "stable",
+  "description": "PTY-backed long-running CLI sessions with multi-client mirroring, ring-buffer scrollback, and reconnect.",
+  "since": "v0.1.0",
+  "implementation": "internal/session/",
+  "states": [
+    { "id": "pending", "terminal": false, "description": "session created but PTY not yet attached" },
+    { "id": "running", "terminal": false, "description": "PTY attached, CLI active" },
+    { "id": "idle",    "terminal": false, "description": "no output for N seconds (configurable)" },
+    { "id": "ended",   "terminal": true,  "description": "CLI exited cleanly" },
+    { "id": "stopped", "terminal": true,  "description": "user-initiated stop / SIGTERM" }
+  ],
+  "transitions": [
+    { "from": "pending", "to": "running" },
+    { "from": "running", "to": "idle" },
+    { "from": "idle",    "to": "running" },
+    { "from": "running", "to": "ended" },
+    { "from": "running", "to": "stopped" },
+    { "from": "idle",    "to": "ended" },
+    { "from": "idle",    "to": "stopped" }
+  ],
+  "pty": {
+    "ring_buffer_bytes": 1048576,
+    "rows_cols_default": [40, 120],
+    "rows_cols_user_overridable": true,
+    "encoding": "utf-8"
+  },
+  "multi_client": {
+    "max_viewers_per_session": 16,
+    "viewer_type": ["web-admin", "mobile-app", "websocket-direct"],
+    "concurrent_drivers": "discouraged; last-writer-wins on stdin"
+  },
+  "child_sessions": {
+    "supported": true,
+    "example_use": "Inspector spawns a /bin/sh child session inside the parent's cwd",
+    "max_depth": 3
+  },
+  "reconnect": {
+    "supported": true,
+    "max_disconnect_seconds": 900,
+    "buffer_replay_on_reconnect": true
+  },
+  "notify": {
+    "events": ["session.started", "session.idle", "session.ended", "session.permission_ask"],
+    "delivery": "via channel hub to configured platforms",
+    "see": "/capabilities/channels.json#/shared/notify_events"
+  }
+}

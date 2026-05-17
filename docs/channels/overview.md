@@ -1,53 +1,120 @@
+---
+kind: concept
+title: Channels — overview
+tldr: A channel is one messaging-platform binding. opendray bundles 7 kinds (telegram / slack / discord / feishu / dingtalk / wecom / bridge); all share the same notify + repeat-policy semantics.
+status: stable
+since: v0.1.0
+topic: channels
+related:
+  - channels/telegram
+  - channels/slack
+  - channels/discord
+  - channels/feishu
+  - channels/dingtalk
+  - channels/wecom
+  - channels/bridge
+  - channels/notifications
+  - channels/routing
+references:
+  capabilities: [channels]
+x-implementation:
+  - internal/channel/hub.go
+  - internal/channel/manager.go
+---
+
 # Channels — overview
 
-A *channel* is one configured messaging integration. Every channel
-follows the same lifecycle:
+> **tldr:** A *channel* is one messaging-platform binding. opendray bundles 7 kinds (telegram / slack / discord / feishu / dingtalk / wecom / bridge); all share the same notify + repeat-policy semantics.
 
-1. **Provision credentials** in the platform's admin console (bot
-   token / OAuth scopes / webhook URL / etc.).
-2. **Channels → New channel** in opendray, paste the credentials.
-3. **Wait for `running`** in the card status pill.
-4. (Optional) **Edit** the Notifications panel to tune mode, topics,
-   and snippet cap.
-5. (Optional) For multi-platform setups, repeat with a different kind.
+## What it is
 
-Each platform has its own setup section below — read the one matching
-your destination chat. The notifications panel and routing rules are
-shared, so once you've wired up one channel the rest is identical.
+A *channel* is one configured messaging integration. Each channel
+wraps the platform-specific protocol (long-poll / Socket Mode /
+Gateway WS / webhook / group robot) behind opendray's uniform notify
++ routing model.
 
-## Bundled platforms
+| Capability JSON | Authoritative source |
+|---|---|
+| [/capabilities/channels.json](/capabilities/channels.json) | Per-kind config schema, supported features, errors |
+
+## Bundled kinds
 
 | Kind | Inbound | Outbound | Public URL? | Best for |
 |---|---|---|---|---|
-| `telegram` | long-poll | REST | no | solo dev — fastest setup |
-| `slack` | Socket Mode | Web API + blocks | no | team chat, native interactivity |
-| `discord` | Gateway WS | REST + embeds | no | dev/maker community |
-| `feishu` | webhook | tenant API | **yes** | China / cross-org formal channels |
-| `dingtalk` | (none) | group robot | no | China enterprise group rooms |
-| `wecom` | (none) | group robot | no | WeCom (企业微信) group rooms |
-| `bridge` | WebSocket | WebSocket | no (token-auth) | custom platforms (Line / KakaoTalk / your own) |
+| [`telegram`](./telegram) | long-poll | REST | no | solo dev — fastest setup |
+| [`slack`](./slack) | Socket Mode | Web API + Block Kit | no | team chat, native interactivity |
+| [`discord`](./discord) | Gateway WS | REST + embeds | no | dev / maker community |
+| [`feishu`](./feishu) | webhook | tenant API | **yes** | China / cross-org formal channels |
+| [`dingtalk`](./dingtalk) | (none) | group robot | no | China enterprise group rooms |
+| [`wecom`](./wecom) | (none) | group robot | no | WeCom (企业微信) group rooms |
+| [`bridge`](./bridge) | WebSocket | WebSocket | no (token-auth) | custom platforms (LINE / KakaoTalk / your own) |
 
-## Capability comparison
+## Lifecycle (same for every kind)
+
+| # | Stage | What happens |
+|---|---|---|
+| 1 | provision | get credentials in the platform's admin console |
+| 2 | register | opendray **Channels → New** → paste credentials |
+| 3 | connect | hub establishes inbound + outbound transports |
+| 4 | running | status pill green; ready to send / receive |
+| 5 | (optional) tune | edit notifications panel: events, repeat policy, snippet |
+| 6 | (optional) repeat | wire another kind for multi-platform fan-out |
+
+## Capability matrix
 
 | Capability | telegram | slack | discord | feishu | dingtalk | wecom | bridge |
 |---|---|---|---|---|---|---|---|
-| Receive user replies | ✓ | ✓ | ✓ | ✓ | — | — | ✓ |
-| Markdown body | ✓ HTML | ✓ blocks | ✓ embed | ✓ card | ✓ md | ✓ md | adapter |
-| Inline buttons | ✓ | ✓ | ✓ | ✓ | nav-only | nav-only | adapter |
-| Reply-to-message routing | ✓ | ✓ thread | ✓ ref | ✓ reply | — | — | adapter |
-| Edit-in-place updates | ✓ | ✓ | ✓ | partial | — | — | adapter |
+| Receive user replies | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✓ |
+| Markdown body | ✓ HTML | ✓ Block Kit | ✓ embed | ✓ Card v2 | ✓ md | ✓ md | adapter |
+| Interactive buttons | ✓ | ✓ | ✓ | ✓ | URL-only | URL-only | adapter |
+| Reply-to-message routing | ✓ | ✓ thread | ✓ ref | ✓ reply | ✗ | ✗ | adapter |
+| Edit-in-place | ✓ | ✓ | ✓ | partial | ✗ | ✗ | adapter |
+| Public URL required | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ |
 
-"nav-only" = group robots can't fire callback buttons, but URL links
-still render as tappable rows.
+"URL-only" = group robots can't fire callbacks but URL buttons still render.
 
-## Where to next
+## When to use
 
-- Pick your platform from the TOC: Telegram / Slack / Discord /
-  Feishu / DingTalk / WeCom / Bridge — each has its own setup
-  section.
-- After at least one channel is running, read **Notifications
-  panel** (mode, topics, snippet cap) and **Multi-session routing**
-  (reply-to-message, `/select`, `/sessions`) — they apply to every
-  channel.
+| You want | Pick |
+|---|---|
+| Fastest path from zero → first push notification | `telegram` |
+| Team workspace with thread-based collaboration | `slack` |
+| Dev / community server with rich embeds | `discord` |
+| Formal cross-org channels in China | `feishu` |
+| Simple "ping me when done" in 企业微信 group | `wecom` or `dingtalk` |
+| Platform not in this list | `bridge` + custom adapter |
+
+## Shared behaviour
+
+Once any channel is `running`, the same admin features apply across all:
+
+- **Notifications panel** — pick which events fire (`session.started`,
+  `session.idle`, `session.ended`, `session.permission_ask`); set
+  repeat policy and terminal snippet. See [notifications](./notifications).
+- **Multi-session routing** — `reply-to-message` / `/select` /
+  `/sessions` commands. See [routing](./routing).
+
+## Related
+
+- [/capabilities/channels.json](/capabilities/channels.json) — machine-readable spec
+- [Notifications panel](./notifications)
+- [Multi-session routing](./routing)
 
 ![Channels page with one running telegram bot](/tutorial/channels-running.png)
+
+<details>
+<summary>📖 Narrative explanation</summary>
+
+The reason all channel kinds share the same notify + routing model
+is that they're all consumers of the same internal event bus
+(`internal/eventbus/`). When a session goes idle, the session
+subsystem publishes a `session.idle` event with the snippet; every
+channel hub subscribes; only the channels whose `notify.idle` is on
+deliver to their upstream platform.
+
+This means you can wire `telegram` for personal notifications, plus
+`feishu` for team visibility, plus a `bridge` adapter for your own
+internal IM — all firing off the same session event without any
+extra wiring.
+
+</details>

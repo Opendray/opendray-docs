@@ -1,7 +1,7 @@
 ---
 layout: page
-title: opendray — Multi-CLI control gateway
-description: Bridge Claude Code, Codex, and Gemini CLI sessions to Telegram, Slack, Discord, Feishu, DingTalk, and WeCom. Self-hosted, local-first, fully open source.
+title: opendray — Self-hosted control gateway for AI coding CLIs
+description: Run Claude Code, Codex, and Gemini CLI on your own server. Drive them from anywhere — web, mobile, Telegram, Slack, Feishu, DingTalk, WeCom. Self-hosted, local-first, fully open source.
 sidebar: false
 aside: false
 editLink: false
@@ -11,9 +11,11 @@ next: false
 ---
 
 <HomeHero />
-<HomeStats />
+<HomeWhy />
+<HomeTour />
 <HomeQuickStart />
-<HomeChannels />
 <HomeFeatures />
+<HomeChannels />
 <HomeShowcase />
+<HomeStats />
 <HomeFooterCta />

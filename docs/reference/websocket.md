@@ -1,4 +1,23 @@
+---
+kind: endpoint
+title: WebSocket events
+tldr: Long-lived event stream. Bearer auth. Subscribe to topic patterns. 25s keepalive. No replay — use REST events?since=<seq> for backfill.
+status: beta
+since: v0.1.0
+topic: reference
+related:
+  - reference/overview
+  - reference/rest
+  - integrations/events-ws
+  - consuming/websocket-events
+  - activity/topics-catalogue
+x-implementation:
+  - internal/integration/events.go
+---
+
 # WebSocket events <Badge type="beta">Beta</Badge>
+
+> **tldr:** Long-lived event stream. Bearer auth. Subscribe to topic patterns. 25s keepalive. No replay — use REST `events?since=<seq>` for backfill.
 
 Long-lived event stream for real-time session output, channel
 deliveries, memory writes, and notifications.

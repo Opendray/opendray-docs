@@ -1,42 +1,116 @@
-# 频道 — 概览
+---
+kind: concept
+title: 频道 Channels — 概览
+tldr: 一个 channel = 一份消息平台绑定。opendray 内置 7 个 kind(telegram / slack / discord / feishu / dingtalk / wecom / bridge),共享同一套 notify + repeat-policy 语义。
+status: stable
+since: v0.1.0
+topic: channels
+related:
+  - channels/telegram
+  - channels/slack
+  - channels/discord
+  - channels/feishu
+  - channels/dingtalk
+  - channels/wecom
+  - channels/bridge
+  - channels/notifications
+  - channels/routing
+references:
+  capabilities: [channels]
+x-implementation:
+  - internal/channel/hub.go
+  - internal/channel/manager.go
+---
 
-一个*频道*就是一份已配置的消息平台集成。每个频道都遵循同样的生命周期:
+# 频道 Channels — 概览
 
-1. 在平台的管理控制台**准备凭证**(bot token / OAuth scope / webhook URL 等)。
-2. 在 opendray 里 **Channels → New channel**,粘贴凭证。
-3. 等待卡片状态标签变为 `running`。
-4.(可选)**Edit** Notifications 面板调整模式、主题和片段上限。
-5.(可选)多平台场景下,用不同的 kind 重复上述步骤。
+> **tldr:** 一个 *channel* = 一份消息平台绑定。opendray 内置 7 个 kind(telegram / slack / discord / feishu / dingtalk / wecom / bridge),共享同一套 notify + repeat-policy 语义。
 
-每个平台下面都有自己的配置章节 — 阅读与你目标 chat 对应的那一节即可。Notifications 面板和路由规则是共享的,所以接好一个频道之后,其余的就完全相同。
+## 是什么
 
-## 内置平台
+一个 *channel* 是一份配置好的消息平台集成。每个 channel 把平台
+专属协议(long-poll / Socket Mode / Gateway WS / webhook / 群机器人)
+包在 opendray 统一的 notify + routing 模型后面。
 
-| Kind | 入站 | 出站 | 需要公网 URL? | 最适合 |
+| Capability JSON | 权威来源 |
+|---|---|
+| [/capabilities/channels.json](/capabilities/channels.json) | 每 kind 配置 schema、能力、错误码 |
+
+## 内置 kind
+
+| Kind | 入站 | 出站 | 公网 URL? | 最适合 |
 |---|---|---|---|---|
-| `telegram` | long-poll | REST | 否 | 个人开发 — 配置最快 |
-| `slack` | Socket Mode | Web API + blocks | 否 | 团队 chat,原生交互 |
-| `discord` | Gateway WS | REST + embeds | 否 | 开发者 / maker 社区 |
-| `feishu` | webhook | tenant API | **是** | 中国 / 跨组织正式频道 |
-| `dingtalk` |(无) | 群机器人 | 否 | 中国企业群组 |
-| `wecom` |(无) | 群机器人 | 否 | WeCom(企业微信)群组 |
-| `bridge` | WebSocket | WebSocket | 否(token 鉴权) | 自定义平台(Line / KakaoTalk / 你自己的) |
+| [`telegram`](./telegram) | long-poll | REST | ✗ | 独立开发者 —— 上手最快 |
+| [`slack`](./slack) | Socket Mode | Web API + Block Kit | ✗ | 团队对话,原生交互 |
+| [`discord`](./discord) | Gateway WS | REST + embeds | ✗ | 开发者 / maker 社区 |
+| [`feishu`](./feishu) | webhook | tenant API | **✓** | 中国 / 跨组织正式频道 |
+| [`dingtalk`](./dingtalk) | (无) | 群机器人 | ✗ | 中国企业群 |
+| [`wecom`](./wecom) | (无) | 群机器人 | ✗ | 企业微信群 |
+| [`bridge`](./bridge) | WebSocket | WebSocket | ✗(token 认证) | 自定义平台(LINE / KakaoTalk / 自有协议) |
 
-## 能力对比
+## 生命周期(所有 kind 一致)
+
+| # | 阶段 | 发生什么 |
+|---|---|---|
+| 1 | 准备凭据 | 在平台后台拿凭据 |
+| 2 | 注册 | opendray **Channels → New** → 粘凭据 |
+| 3 | 连接 | hub 建立入站 + 出站 transport |
+| 4 | running | 状态徽章绿,可发可收 |
+| 5 | (可选)调优 | 编辑 notifications 面板:事件、repeat 策略、snippet |
+| 6 | (可选)多平台 | 配另一个 kind,多平台扇出 |
+
+## 能力对比矩阵
 
 | 能力 | telegram | slack | discord | feishu | dingtalk | wecom | bridge |
 |---|---|---|---|---|---|---|---|
-| 接收用户回复 | ✓ | ✓ | ✓ | ✓ | — | — | ✓ |
-| Markdown body | ✓ HTML | ✓ blocks | ✓ embed | ✓ card | ✓ md | ✓ md | adapter |
-| 内联按钮 | ✓ | ✓ | ✓ | ✓ | 仅导航 | 仅导航 | adapter |
-| reply-to-message 路由 | ✓ | ✓ thread | ✓ ref | ✓ reply | — | — | adapter |
-| 原地编辑更新 | ✓ | ✓ | ✓ | 部分 | — | — | adapter |
+| 接收用户回复 | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✓ |
+| Markdown body | ✓ HTML | ✓ Block Kit | ✓ embed | ✓ Card v2 | ✓ md | ✓ md | adapter |
+| 交互按钮 | ✓ | ✓ | ✓ | ✓ | 仅 URL | 仅 URL | adapter |
+| 回复消息路由 | ✓ | ✓ thread | ✓ ref | ✓ reply | ✗ | ✗ | adapter |
+| 原地编辑 | ✓ | ✓ | ✓ | partial | ✗ | ✗ | adapter |
+| 需要公网 URL | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ |
 
-"仅导航" = 群机器人不能触发回调按钮,但 URL 链接仍然渲染为可点击行。
+"仅 URL" = 群机器人不能触发回调,但 URL 按钮能渲染。
 
-## 接下来去哪里
+## 何时用哪个
 
-- 从目录中挑选你的平台:Telegram / Slack / Discord / 飞书 / DingTalk / WeCom / Bridge — 每个有自己的配置章节。
-- 至少一个频道运行后,阅读 **Notifications 面板**(模式、主题、片段上限)和 **Multi-session routing**(reply-to-message、`/select`、`/sessions`) — 它们适用于每个频道。
+| 你想要 | 选 |
+|---|---|
+| 从零到第一条推送的最快路径 | `telegram` |
+| 团队 workspace + 线程协作 | `slack` |
+| 开发 / 社区服务器 + 富 embed | `discord` |
+| 中国跨组织正式频道 | `feishu` |
+| 简单的"完成了告诉我"到企业微信 | `wecom` 或 `dingtalk` |
+| 平台不在此列表 | `bridge` + 自定义 adapter |
 
-![Channels page with one running telegram bot](/tutorial/channels-running.png)
+## 共享行为
+
+只要任何 channel 处于 `running`,所有 channel 共用同一套后台特性:
+
+- **Notifications 面板** —— 选哪些事件触发(`session.started`、
+  `session.idle`、`session.ended`、`session.permission_ask`),设
+  repeat 策略和终端 snippet。见 [notifications](./notifications)。
+- **Multi-session routing** —— `reply-to-message` / `/select` /
+  `/sessions` 命令。见 [routing](./routing)。
+
+## 关联
+
+- [/capabilities/channels.json](/capabilities/channels.json) — 机器可读
+- [Notifications 面板](./notifications)
+- [Multi-session 路由](./routing)
+
+![Channels 页面有一个 running 的 telegram bot](/tutorial/channels-running.png)
+
+<details>
+<summary>📖 叙事说明</summary>
+
+所有 channel kind 共用同一套 notify + routing 模型的原因是它们都
+消费同一个内部 event bus(`internal/eventbus/`)。会话进入 idle 时,
+session 子系统发布 `session.idle` 事件带 snippet;每个 channel hub
+订阅;只有 `notify.idle` 开了的 channel 才推到上游平台。
+
+这意味着你可以同时配 `telegram` 做个人通知 + `feishu` 做团队可见性
++ `bridge` adapter 接入自有 IM —— 都触发自同一个 session 事件,
+不需要额外接线。
+
+</details>

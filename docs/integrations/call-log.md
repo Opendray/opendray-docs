@@ -1,106 +1,89 @@
-# Call log
+---
+kind: capability
+title: Integration call log
+tldr: Per-integration audit trail. Separate table from audit_log for volume. Fields — timestamp, integration_id, direction, method, path, status, latency_ms, resource_kind/id.
+status: stable
+since: v0.1.0
+topic: integrations
+related: [integrations/overview, activity/overview]
+capability: [per-integration-audit, latency-tracking, filterable]
+inbound: middleware
+outbound: postgres
+x-implementation: [internal/integration/calllog.go]
+---
 
-Every authenticated `/api/v1/*` call (admin or integration) lands
-in the `integration_call_log` Postgres table. The Integrations
-page surfaces a search + filter UI on top of it.
+# Integration call log
 
-## What's logged
+> **tldr:** Per-integration audit trail. Separate table from `audit_log` for volume. Fields — timestamp, integration_id, direction, method, path, status, latency_ms, resource_kind/id.
 
-| Column | Example |
+## Where
+
+| Where to view | Path |
 |---|---|
-| `id` | bigint serial |
-| `ts` | `2026-05-04 10:32:14+00` |
-| `principal_kind` | `admin` or `integration` |
-| `principal_id` | admin uid (always `1`) or `int_abc...` |
-| `method` | `GET` / `POST` / etc. |
-| `path` | `/api/v1/sessions/ses_xyz/stream` |
-| `status` | HTTP status code |
-| `duration_ms` | round-trip time |
-| `request_id` | matches the structured log line |
+| Web admin | **Activity** page → filter by integration |
+| API | `GET /api/v1/integrations/{id}/calls?since=...&direction=...` |
+| Postgres | `integration_call_log` table |
 
-opendray excludes admin calls from the log by default — the
-table is for *external* tools, not the operator clicking around.
-Toggle the **Include admin calls** filter if you want to see
-your own admin actions too.
-
-## What it's good for
-
-### Billing / chargeback
+## Row schema
 
 ```sql
-select principal_id, count(*), avg(duration_ms)
-from integration_call_log
-where ts >= now() - interval '30 days'
-  and path like '/api/v1/proxy/anthropic/%'
-group by 1
-order by 2 desc;
+CREATE TABLE integration_call_log (
+  id              UUID PRIMARY KEY,
+  ts              TIMESTAMPTZ NOT NULL,
+  integration_id  TEXT NOT NULL,
+  direction       TEXT NOT NULL,        -- 'inbound' | 'outbound' | 'proxied'
+  method          TEXT NOT NULL,        -- HTTP method
+  path            TEXT NOT NULL,        -- request path
+  status          INT  NOT NULL,        -- HTTP status code
+  latency_ms      INT  NOT NULL,
+  resource_kind   TEXT,                 -- 'session' | 'channel' | 'memory' | ...
+  resource_id     TEXT,                 -- e.g. 's_42'
+  request_id      TEXT NOT NULL,        -- correlation id
+  error_code      TEXT                  -- if status >= 400
+);
+
+CREATE INDEX idx_call_log_integration_ts ON integration_call_log (integration_id, ts DESC);
+CREATE INDEX idx_call_log_ts_status ON integration_call_log (ts DESC, status);
 ```
 
-Tells you which integration burned the most Anthropic API calls
-last month — useful when you're sharing chargeback to internal
-teams.
+## Direction values
 
-### Anomaly detection
+| Value | What |
+|---|---|
+| `inbound` | integration called opendray (e.g. spawn session) |
+| `outbound` | opendray pushed to integration (events WS) |
+| `proxied` | integration's client called `/api/v1/proxy/<prefix>/*` and we forwarded |
 
-The Activity page can subscribe to `integration.call_logged`
-events live and surface them in real time. Easy ad-hoc alerts
-("ping me if any call to /v1/messages takes >30s") without
-running a full APM stack.
+## Filter (Activity page)
 
-### Forensics
+| Filter | Source |
+|---|---|
+| Integration | dropdown of registered integrations |
+| Direction | inbound / outbound / proxied / any |
+| Status | 2xx / 3xx / 4xx / 5xx |
+| Time range | last 1h / 24h / 7d / 30d / custom |
+| Resource | path-contains filter (`session/s_42`) |
 
-When an integration's behaviour changes unexpectedly, the call
-log gives you:
+## Why separate from `audit_log`
 
-- timing — when did the volume spike start?
-- correlation — `request_id` lets you find the structured log
-  line for any call
-- attribution — which key was used (helps pin the misbehaving
-  caller)
-
-## Filters
-
-The table supports filters on:
-
-- Time range (default last 24h; presets for 1h / 24h / 7d / 30d)
-- Principal (any specific integration id, or `admin`)
-- Path prefix (auto-completes on existing path patterns)
-- Status code range
-- Duration ≥ N ms
-
-Filters apply to a server-side SQL query, not in-memory — so
-filtering 30 days of high-volume traffic is fast.
+| audit_log | integration_call_log |
+|---|---|
+| admin actions (create channel, rotate key) | every per-call event |
+| ~10s/day | up to 1000s/day per integration |
+| append-only | append-only |
+| no auto-prune | configurable retention (default 30d) |
 
 ## Retention
 
-Default retention is **30 days**. Configurable in `config.toml`:
-
 ```toml
-[integration]
-call_log_retention_days = 30
+[integration.call_log]
+retention_days = 30           # 0 = forever
+prune_schedule = "0 3 * * *"  # cron, daily 3am
 ```
 
-A daily background job runs a `DELETE FROM integration_call_log
-WHERE ts < now() - retention`. To keep forever, set
-`call_log_retention_days = 0`.
+## Errors
 
-## Exporting
-
-For external SIEM ingestion, the API exposes:
-
-```
-GET /api/v1/integrations/_call-log/export?since=<ts>
-```
-
-Streams JSONL to the response body — one row per call. Use the
-admin token; the call log is read-only via this endpoint
-(insertion is server-internal).
-
-## Privacy note
-
-opendray does **not** log request or response bodies. The path is
-recorded but query parameters that look like tokens (`?token=...`,
-`?api_key=...`, `?password=...`) are redacted to `?token=REDACTED`
-before storage. If you embed sensitive content in path segments
-(don't), adjust `internal/integration/calllog.go`'s `redactPath`
-to match.
+| code | http | cause | fix |
+|---|---|---|---|
+| `call_log_query_too_broad` | 400 | query window > 30d without filter | narrow time range or add integration_id |
+| `call_log_export_too_large` | 413 | CSV export > 100 MB | narrow filter or use API pagination |

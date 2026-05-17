@@ -1,60 +1,92 @@
-# 标签与键盘导航
+---
+kind: concept
+title: Tab 与键盘导航
+tldr: 点击 / 拖 / 右键 tab。vim 风格 g 前缀快捷键。Ctrl+Tab 切换、Ctrl+1-9 跳转、Ctrl+W 关闭、n s 打开 Spawn、g i 切换 Inspector。
+status: stable
+since: v0.1.0
+topic: sessions
+related:
+  - sessions/overview
+  - sessions/spawning
+  - sessions/inspector
+references:
+  capabilities: [sessions]
+x-implementation:
+  - app/web/src/features/sessions/tabs/
+---
 
-Sessions 页面是后台中键盘快捷键最重的页面。一旦熟悉,你可以不碰鼠标管理十几个 CLI。
+# Tab 与键盘导航
 
-## 标签条
+> **tldr:** 点击 / 拖 / 右键 tab。vim 风格 g 前缀快捷键。`Ctrl+Tab` 切换、`Ctrl+1-9` 跳转、`Ctrl+W` 关闭、`n s` 打开 Spawn、`g i` 切换 Inspector。
 
-![Multi-tab strip](/tutorial/sessions-tab-strip.png)
+## Tab 行为
 
-- **点击标签**切换。
-- **点击运行中标签上的 ×** → 停止前确认。
-- **点击 stopped/ended 标签上的 ×** → 视觉关闭(行保留在 DB)。
-- **拖动标签**重新排序(状态按用户持久化)。
-- **右键标签**打开上下文菜单:Restart、Rename、Close。
+| 动作 | 结果 |
+|---|---|
+| 点 tab | 切换活动会话 |
+| ✕ 在 running tab | 确认对话框 → SIGTERM |
+| ✕ 在 stopped/ended tab | 视觉关(DB row 保留) |
+| 拖 tab | 重新排序;每用户持久化 |
+| 右键 | 上下文菜单:Restart / Rename / Close |
+| 长名字 | 中间省略(`my-project-foo-…-feat-x`)—— 末尾上下文保留 |
 
-长名称会在中间省略(`my-project-foo-…-feat-x`),让结尾上下文(`-feat-x`)仍可读。
+![多 tab strip](/tutorial/sessions-tab-strip.png)
 
 ## 键盘快捷键
 
-### 会话间导航
+### Session 间导航
 
 | 快捷键 | 动作 |
 |---|---|
-| `g s` | 跳到 Sessions 页面 |
-| `Ctrl + Tab` | 下一个标签 |
-| `Ctrl + Shift + Tab` | 上一个标签 |
-| `Ctrl + 1` … `Ctrl + 9` | 跳到第 N 个标签 |
-| `Ctrl + W` | 关闭当前标签(运行中会确认) |
+| `g s` | 跳到 Sessions 页 |
+| `Ctrl + Tab` | 下一 tab |
+| `Ctrl + Shift + Tab` | 上一 tab |
+| `Ctrl + 1` – `Ctrl + 9` | 跳到第 N 个 tab |
+| `Ctrl + W` | 关当前 tab(running 时确认) |
 
-`g`-前缀的快捷键是 vim 风格 — 按 `g`,然后在约 1.5 秒内按第二个键。状态栏会在 `g` 待定时显示一个小面包屑,所以你知道按键已注册。
+`g` 前缀是 vim 风格 —— 按 `g`,~1.5s 内再按第二个键。状态栏在 `g`
+pending 时显示 breadcrumb。
 
 ### 终端内
 
-xterm.js 直接处理按键。opendray 唯一的特殊拦截是 **`Ctrl + Shift + ↑/↓`** 用于回滚旁路 — 其它的看供应商自己的文档(Claude 有自己的 `Ctrl-G` 前缀循环用于权限模式等)。
+| 被 opendray 截获 | 由 xterm.js / provider 处理 |
+|---|---|
+| `Ctrl + Shift + ↑/↓`(scrollback bypass) | 其他全部 |
+
+Claude 有自己 `Ctrl-G` 前缀循环切权限模式等。看 provider 文档。
 
 ### Inspector
 
 | 快捷键 | 动作 |
 |---|---|
 | `g i` | 切换 Inspector 面板 |
-| `1` – `7`(聚焦 Inspector 时) | 在子标签之间切换(Files、Git、Search、Tasks、History、Notes、Memory) |
+| `1` – `7`(Inspector 聚焦时) | 切换子 tab(Files / Git / Search / Tasks / History / Notes / Memory) |
+| `Esc` | 焦点回终端 |
 
-通过点击一次 Inspector 来聚焦它,然后数字键就会生效。ESC 把焦点还给终端。每个子标签的功能见 [Inspector 面板](#02-sessions-03-inspector) 页。
+点 Inspector 内部一次让其聚焦,然后数字键生效。
 
 ### Spawn
 
 | 快捷键 | 动作 |
 |---|---|
-| `n s` | 打开 Spawn 对话框(在 Sessions 页面时) |
-| `Esc` | 关闭任何打开的对话框 |
-| `Cmd/Ctrl + Enter` | 提交对话框(在 Spawn 表单的任何字段时) |
+| `n s` | 打开 Spawn 对话框(在 Sessions 页) |
+| `Esc` | 关任意打开的对话框 |
+| `Cmd/Ctrl + Enter` | 提交对话框(Spawn 表单任意字段) |
 
 ### 帮助
 
-每个页面右上角的提示栏显示与该页面最相关的快捷键。把鼠标移到 `?` 上查看完整键位图。
+| 位置 | 内容 |
+|---|---|
+| 每页右上 | hint bar 显示该页最相关快捷键 |
+| hover `?` 图标 | 完整 keymap |
 
-## 触摸 / 移动端
+## 触屏 / 移动
 
-Sessions 页面在平板上能用,但手机上不行 — 终端至少需要 600px 宽才可用。窄视口下侧栏折叠为图标模式、Inspector 改为覆盖而非并排,标签条变成水平滚动。
+| 视口 | Sessions 页 UX |
+|---|---|
+| 桌面(≥1024px) | 完整布局 |
+| 平板(600–1023px) | 侧栏 icon-only,Inspector 浮层,tab strip 横滚 |
+| 手机(<600px) | 不可用 —— 用 [channel](../channels/overview) 替代 |
 
-只用手机的话,改用[频道](#channels-overview):接收空闲通知,从手机回复,让 opendray 通过 Telegram / Slack 等把你的文本转发到合适的会话。
+手机专用:收 idle 通知,从手机回复,opendray 通过 Telegram / Slack
+等转发文本到正确会话。

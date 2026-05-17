@@ -1,44 +1,59 @@
-# 备份 — 计划
+---
+kind: capability
+title: 备份 — 调度
+tldr: cron 表达式触发备份 run。扇出到所有 enabled target。每次成功上传后跑 retention 修剪。默认 `0 2 * * *`(每天凌晨 2 点)。
+status: stable
+since: v0.1.0
+topic: backup
+related: [backup/overview, backup/targets, backup/quickstart]
+capability: [cron-trigger, multi-target-fanout, retention-prune]
+inbound: cron
+outbound: target
+x-implementation: [internal/backup/scheduler.go]
+---
 
-*计划* 是 "每 N 秒自动拿一次备份,把超过保留 N 行之外的剪掉"。
+# 备份 — 调度
 
-## 节奏
+> **tldr:** cron 表达式触发备份 run。扇出到所有 enabled target。每次成功上传后跑 retention 修剪。默认 `0 2 * * *`(每天凌晨 2 点)。
 
-v1 用简单的 **interval** 调度,不是 cron 表达式。在 New
-schedule 对话框(`/backups` 上的 Schedules tab)里选 "每
-24 小时 / 6 小时 / 30 分钟"。cron 语法推迟到 v1.1。
+## Config
 
-一个调度器 goroutine 每 30 秒醒来一次,然后:
+```toml
+[backup.schedule]
+enabled    = true
+expression = "0 2 * * *"
+timezone   = "Asia/Shanghai"
+retention_days_default = 30
 
-1. 通过 `SELECT … FOR UPDATE SKIP LOCKED LIMIT 1` 原子地认领
-   一个到期的计划。多个 opendray 实例在同一张表上能安全协作。
-2. 同步跑备份(同一个 opendray 实例内对同一计划串行 — 没有
-   并行运行)。
-3. 成功后应用保留:per-target 保留 N 个最近的 `succeeded`
-   备份,其余软删除(它们的 blob 从 target 移除;行保留在
-   `status='deleted'` 以便审计)。
+[backup.schedule.advanced]
+max_dump_duration_minutes = 30
+post_run_command = ""
+```
 
-## 保留语义
+## Cron 示例
 
-`retention = 7` 意味着 "per-target 永远保留 7 个最新的成功
-备份"。失败和被删的行不计 — 只算 `succeeded` 的。UI 默认 7;
-底线是 0(意味着 "拿完就立刻删每个成功的备份",只在烟雾
-测试场景下有意义)。
+| 表达式 | 何时 |
+|---|---|
+| `0 2 * * *` | 每天凌晨 2 点 |
+| `0 */6 * * *` | 每 6 小时 |
+| `0 3 * * 0` | 周日 凌晨 3 点 |
+| `*/15 * * * *` | 每 15 分钟(重,只用于测试) |
 
-## 崩溃时发生什么
+## 每次 run 流程
 
-- 卡在 `status='running'` 的备份行(因为 opendray 在流水线
-  中途崩了),1 小时后用一个清晰的标记错误重置为 `failed`。
-  重置在下次启动时自动跑。
-- 一个在运行中途崩的计划,它的 `next_run_at` 已经被 bump 过
-  了;失败的运行在 `backups` 表里,所以你能看到为什么失败,
-  而它不会阻塞节奏。
+| # | 步骤 |
+|---|---|
+| 1 | scheduler 触发 cron |
+| 2 | pg_dump → 用 `OPENDRAY_BACKUP_KEY` 加密 → 写到 staging 临时文件 |
+| 3 | 每个 enabled target 并行:上传 |
+| 4 | 每个 target 成功 → retention 修剪该 target(删超 `retention_days` 的文件) |
+| 5 | 任一 target 失败 → `/backups` UI 标记;staging 文件保留供重试 |
+| 6 | 发 `backup.run.completed` / `backup.run.failed` 事件 |
 
-## 禁用 vs 删除
+## 手动 run
 
-计划的 `enabled` 切换和删除是分开的。想暂停又不丢配置时切到
-off。删除会移除计划但保留之前的备份(它们通过 `schedule_id`
-关联,会变成 NULL — schema 用的是 `ON DELETE SET NULL`)。
-
-被启用计划引用的 target **不能被删除**(`ON DELETE RESTRICT`)。
-先禁用 / 删除计划。
+| 在哪 | 动作 |
+|---|---|
+| `/backups` UI | Run now 按钮 |
+| CLI | `opendray backup run-now` |
+| API | `POST /api/v1/backup/runs` |

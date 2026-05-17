@@ -1,108 +1,100 @@
+---
+kind: capability
+title: Slack
+tldr: 创建 Slack app → 开 Socket Mode → 拿 xoxb + xapp token → Channels → New → kind=slack 粘进去。不需要公网 URL。
+status: stable
+since: v0.1.0
+topic: channels
+related:
+  - channels/overview
+  - channels/notifications
+  - channels/routing
+capability:
+  - text
+  - block-kit
+  - interactive-buttons
+  - threading
+  - reply-routing
+  - edit-in-place
+inbound: socket-mode
+outbound: web-api
+public-url-required: false
+setup-time-minutes: 10
+x-implementation:
+  - internal/channel/slack/
+x-api-version: slack-bolt-2024
+---
+
 # Slack
 
-**模式:** Socket Mode(无需公网 URL)
-**能力:** text · card (Block Kit) · buttons · update_message · reply_to_message (thread_ts)
-**配置时间:** 约 10 分钟(Slack 管理控制台有许多标签)
+> **tldr:** 创建 Slack app → 开 Socket Mode → 拿 `xoxb-` + `xapp-` token → **Channels → New → kind=slack** 粘进去。Socket Mode 跑外联 WS,不需要公网 URL。
 
-Slack 的 Socket Mode 让 bot 反向打开一个到 Slack 的出站 WebSocket,而不是接收 webhook — opendray 可以在 NAT 后面运行,不需要公网暴露任何东西。
+## Setup
 
-## 1. 创建一个 Slack app
+| # | 操作 | 在哪做 |
+|---|---|---|
+| 1 | [api.slack.com/apps](https://api.slack.com/apps) → Create New App → *From scratch* | Slack 后台 |
+| 2 | 启用 **Socket Mode** → 创建 App-Level token,scope `connections:write` → 保存 `xapp-` token | Slack 后台 |
+| 3 | **OAuth & Permissions** → bot scope 加 `chat:write`、`channels:history`、`groups:history`、`im:history`,可选 `chat:write.public` → 安装到 workspace → 保存 `xoxb-` token | Slack 后台 |
+| 4 | **Event Subscriptions** → On → 订阅 `message.channels`、`message.groups`、`message.im` | Slack 后台 |
+| 5 | **Interactivity & Shortcuts** → On(Socket Mode 不需要 URL) | Slack 后台 |
+| 6 | Slack 客户端 `/invite @你的Bot` 到目标频道,右键频道 → channel ID(`C0123ABC456`) | Slack 客户端 |
+| 7 | opendray **Channels → New → kind=slack** → 粘 bot token + app token + 默认 channel id → Save | opendray 后台 |
 
-1. 访问 [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → *From scratch*。
-2. 给它命名(例如 `OpenDray`)并选择目标 workspace。
-3. 创建后你会落在 app 的 *Basic Information* 页 — 保持打开,稍后回来。
+## Config schema
 
-![Slack app create flow](/tutorial/slack-app-create.png)
+```yaml
+kind: slack                              # 字面量,必填
+bot_token: "xoxb-..."                    # 必填密文,正则 /^xoxb-/
+app_token: "xapp-..."                    # 必填密文,正则 /^xapp-/
+default_channel_id: "C0123ABC456"        # 选填
+signing_secret: string                   # 选填,只在用 HTTP Events(非 Socket Mode)时需要
+notify:
+  started:          false
+  idle:             true
+  ended:            true
+  permission_ask:   true
+repeat_policy: once-per-session
+snippet:
+  enabled:    false
+  max_lines:  10
+enabled: true
+```
 
-## 2. 启用 Socket Mode + 创建 App-Level token
+## Capabilities
 
-1. 侧栏 → **Socket Mode** → 打开。
-2. Slack 提示你创建一个 *App-Level Token*:
-   - **Name:** `opendray-socket`
-   - **Scope:** `connections:write`
-   - **Generate**。
-3. 复制 **xapp-…** token。这是 **App-Level Token**。
+| 能力 | 支持 | 实现备注 |
+|---|---|---|
+| 入站(Socket Mode) | ✓ | 外联 WS,不需要公网 URL |
+| Block Kit | ✓ | `header` / `section` / `divider` / `actions` / `context` 从 card model 映射 |
+| 交互式按钮 | ✓ | `actions` block 的 `button`,`primary` / `danger` 样式 |
+| 线程化 | ✓ | 回复带 `thread_ts` |
+| 回复路由 | ✓ | 线程回复进原会话 stdin |
+| 原地编辑 | ✓ | `idle → running` 状态变更复用 |
+| HTTP Events API | ◐ | 支持但非默认,设 `signing_secret` 启用 |
+| 文件上传 | ✗ | 未实现 |
 
-## 3. 添加 bot OAuth scope
+## Errors
 
-侧栏 → **OAuth & Permissions** → 滚动到 *Bot Token Scopes* → **Add an OAuth Scope** → 至少添加:
+| code | http | 原因 | 修复 |
+|---|---|---|---|
+| `slack_invalid_token` | 401 | token 错或正则不匹配 | 重检 `xoxb-` / `xapp-` 前缀 |
+| `slack_missing_scope` | 403 | bot scope 缺该操作 | 加 scope 后重新安装 app |
+| `slack_channel_not_found` | 404 | channel_id 错或 bot 没被邀请 | `/invite @bot` 到目标频道 |
+| `slack_thread_archived` | 410 | 线程已关闭 | 新开对话 |
+| `slack_rate_limited` | 429 | 方法级 tier 限流 | 遵守 `Retry-After` |
 
-- `chat:write` — 发送消息
-- `channels:history` — 读取 bot 所在公共 channel 的消息
-- `groups:history` — 同上,私有 channel
-- `im:history` — 同上,DM
+<details>
+<summary>📖 叙事说明</summary>
 
-可选但推荐:
+Slack Socket Mode 让 bot 通过外联 WebSocket 反向连回 Slack,而不是
+接收 webhook —— opendray 在 NAT 后面也能跑,不需要打开任何端口。
+代价是后台配置要点 7 步,但不用碰防火墙。
 
-- `chat:write.public` — 发送到 bot 不是成员的 channel(对 `#general` 风格的通知很方便)
+Block Kit 是 Slack 的结构化卡片模型。opendray 把内部 Card 模型
+(`CardHeader`、`CardMarkdown`、`CardActions`、`CardListItem`、
+`CardSelect`、`CardNote`)映射成对应的 Block Kit blocks。`primary` /
+`danger` 样式的按钮映射到 Slack 的对应按钮样式。映射代码在
+`internal/channel/slack/blockkit.go`。
 
-然后滚回顶部点 **Install to Workspace**。批准。
-
-安装后,复制 **Bot User OAuth Token**(以 `xoxb-` 开头)。
-
-## 4. 订阅事件
-
-侧栏 → **Event Subscriptions** → 打开。(Socket Mode 通过 WS 传递事件 — 不需要输入 Request URL。)
-
-在 *Subscribe to bot events* 添加:
-
-- `message.channels` — 公共 channel 中的消息
-- `message.groups` — 私有 channel 中的消息
-- `message.im` — DM
-
-保存更改。
-
-## 5. 启用 interactivity
-
-侧栏 → **Interactivity & Shortcuts** → 打开。(Socket Mode 下不需要 URL。)按钮点击回传必需。
-
-## 6. 把 bot 邀请到一个 channel
-
-在 Slack 里:打开目标 channel 运行 `/invite @OpenDray`。
-
-右键 channel → **View channel details** → 滚到底部的 **Channel ID**。复制(形如 `C0123ABC456`)。
-
-![Slack channel ID](/tutorial/slack-channel-id.png)
-
-## 7. 在 opendray 中配置
-
-Channels → **New channel** → kind **Slack**。
-
-| 字段 | 值 |
-|---|---|
-| **Bot token (xoxb-…)** | 来自步骤 3 |
-| **App-level token (xapp-…)** | 来自步骤 2 |
-| **Default channel ID** | 来自步骤 6 |
-
-保存,**Enabled = on**。
-
-## 8. 验证
-
-- 服务器日志应该显示 `slack socket-mode connected`。
-- 卡片翻转到 `RUNNING`。
-- 点击 **Test** → 消息出现在 channel 里。
-- 给 bot 私发 `/help` — opendray 在线程内回复。
-
-## Block Kit 渲染
-
-opendray 把内部 Card 模型转换为 Slack Block Kit blocks:
-
-- `CardHeader` → `header` block(大号粗体)
-- `CardMarkdown` → `section`,text 类型为 `mrkdwn`
-- `CardDivider` → `divider`
-- `CardActions` → `actions` block,内含 `button` 元素;`primary`/`danger` 样式映射到 Slack 的 primary/danger 按钮样式
-- `CardListItem` → 带 accessory button 的 section
-- `CardSelect` → `static_select` 元素
-- `CardNote` → `context` block(小号灰色页脚)
-
-线程处理:当会话回复作为通知消息下的线程到达时,opendray 发送 `thread_ts`,这样整段来回都留在同一个线程。
-
-## 限制
-
-- Slack 的 `mrkdwn` ≠ 标准 Markdown:
-  - 粗体 = `*text*`(单星号,**不是** `**`)
-  - 斜体 = `_text_`
-  - 链接 = `<https://url|label>`
-  - **标题(`#`)和表格不渲染** — 会按字面出现
-- Free plan 限制消息历史;老通知可能从搜索里消失。
-- `public_distribution` 模式下的 app(通过 App Directory 共享)需要额外审核流程 — 在你确定之前保持 app 私有。
+</details>

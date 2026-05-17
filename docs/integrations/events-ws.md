@@ -1,114 +1,101 @@
+---
+kind: endpoint
+title: Events WebSocket
+tldr: /api/v1/integrations/_events streams session/channel/memory events. Auth via Bearer integration key. Topic filter on connect. 25s keepalive.
+status: stable
+since: v0.1.0
+topic: integrations
+related: [integrations/overview, integrations/auth-model, activity/topics-catalogue]
+operations:
+  - operationId: integrationsEventsStream
+    method: GET
+    path: /api/v1/integrations/_events
+    summary: WebSocket event stream
+    tags: [integrations]
+    x-protocol: websocket
+    x-required-scope: 'event:subscribe:*'
+x-implementation:
+  - internal/integration/events.go
+---
+
 # Events WebSocket
 
-`/api/v1/integrations/_events` exposes opendray's internal event
-bus as a WebSocket stream. Any process holding a valid token
-(admin or integration with the right scope) can subscribe and
-react to events as they happen.
+> **tldr:** `/api/v1/integrations/_events` streams session/channel/memory events. Auth via Bearer integration key. Topic filter on connect. 25s keepalive.
 
-## When to use
+## Connect
 
-- **Local dashboards** that want a live tail without polling.
-- **Custom alerting** scripts that act on `session.idle` or
-  `channel.message_forwarded`.
-- **Cross-host orchestration** — one opendray's events drive
-  another opendray instance via integration keys.
+```ts
+const ws = new WebSocket('ws://localhost:8770/api/v1/integrations/_events', [], {
+  headers: { Authorization: 'Bearer od_live_xxx' },
+})
 
-The Activity page uses this same endpoint internally, so any
-event you can see there is reachable from external code.
-
-## Connecting
-
-```python
-import websocket
-import json
-
-ws = websocket.WebSocketApp(
-    "ws://opendray-host/api/v1/integrations/_events",
-    header={"Authorization": "Bearer YOUR_INTEGRATION_KEY"},
-    on_message=lambda _, msg: print(json.loads(msg)),
-)
-ws.run_forever()
+ws.addEventListener('open', () => {
+  ws.send(JSON.stringify({
+    type: 'subscribe',
+    topics: ['session.s_42.output', 'channel.*.delivery']
+  }))
+})
 ```
 
-Or with `wscat`:
-
-```bash
-wscat -c "ws://opendray-host/api/v1/integrations/_events" \
-      -H "Authorization: Bearer YOUR_INTEGRATION_KEY"
-```
-
-For browsers (which can't set Authorization on a WS upgrade), the
-endpoint also accepts `?token=` in the query string. Use this
-sparingly — query tokens leak into proxy access logs.
-
-## Frame shape
-
-Every frame is one JSON object:
+## Message envelope
 
 ```json
 {
-  "topic": "session.idle",
-  "ts": "2026-05-04T10:32:14.123Z",
-  "data": {
-    "session_id": "ses_abc123",
-    "idle_for_ms": 30000,
-    "recent_output": "● Got it — let's design the API.\n\n● Write(...)..."
+  "topic": "session.s_42.output",
+  "ts": "2026-05-17T10:32:18.421Z",
+  "payload": {
+    "stream": "stdout",
+    "data": "Reading src/auth/login.ts...\n"
   }
 }
 ```
 
-| Field | Notes |
+## Topic patterns
+
+| Pattern | Subscribes to |
 |---|---|
-| `topic` | dotted name; subscribe filter matches by prefix |
-| `ts` | server-side timestamp at publish |
-| `data` | topic-specific payload |
+| `session.s_42.output` | exact |
+| `session.*.output` | all sessions' output |
+| `session.*` | every session event |
+| `channel.*.delivery` | every channel delivery receipt |
+| `memory.*` | all memory events |
 
-## Filtering
+Topics enforced against scope: `event:subscribe:session.*` allows
+subscribing to `session.*` but rejects `channel.*`.
 
-Pass `?topics=session.,channel.message_` (comma-separated
-prefixes) on the WS upgrade URL. Server-side filter — only
-matching events stream to that connection.
+## Lifecycle
 
-If `topics` is omitted, you get **everything** — useful for the
-Activity page where the operator filters client-side, but bad
-for production scripts (you waste bandwidth).
+| Message | Direction | Use |
+|---|---|---|
+| `{"type":"subscribe","topics":[...]}` | client → server | add topics (additive — keeps existing) |
+| `{"type":"unsubscribe","topics":[...]}` | client → server | remove topics |
+| `{"topic":..., "payload":...}` | server → client | event |
+| `{"type":"ping"}` | server → client | every 25s |
+| `{"type":"pong"}` | client → server | echo back |
+| `{"type":"error", "code":...}` | server → client | scope violation / bad topic syntax |
 
-## Topics catalogue
+## No-replay
 
-See [Activity → Topics catalogue](#activity-topics-catalogue) for
-the full list. The most-used:
-
-| Topic | Payload highlights |
+| Connection state | Behaviour |
 |---|---|
-| `session.started` | `session_id`, `provider_id`, `cwd` |
-| `session.idle` | `session_id`, `idle_for_ms`, `recent_output` |
-| `session.ended` | `session_id`, `exit_code`, `state` |
-| `channel.message_received` | `channel_id`, `text`, `author` |
-| `channel.message_forwarded` | `channel_id`, `session_id`, `text` |
-| `channel.command_received` | `channel_id`, `command`, `args` |
-| `integration.call_logged` | call log row, post-write |
+| Dropped | events delivered while disconnected NOT replayed |
+| Reconnect | re-subscribe with same topics; fresh events from `now` |
+| Backfill | use REST `GET /api/v1/sessions/:id/events?since=<seq>` for missed events |
 
-## Backpressure
+## Limits
 
-Slow subscribers get **dropped** rather than blocking the bus —
-opendray prioritises the producer side of every event channel.
-If your script stalls on a long DB write while events fan in, you
-will silently lose events. Two options:
+| Limit | Value |
+|---|---|
+| Topics per connection | 64 |
+| Connections per integration | 8 |
+| Message size | 1 MB |
+| Keepalive (server ping) | 25s |
+| Idle disconnect | 60s w/o pong |
 
-1. Spawn a goroutine / async task per frame and return
-   immediately from `on_message`.
-2. Subscribe with a tight `topics` filter so the per-second
-   rate is low.
+## Errors
 
-Lost events do **not** trigger a reconnect — there's no "you
-missed N events" signal. For audit-grade processing, use the
-call log (which is durable Postgres) and treat the events stream
-as a UI/dashboard tool.
-
-## Connection lifecycle
-
-- WS-level pings every ~54s; clients should respect WebSocket
-  Pong (most libraries do automatically).
-- Idle close: 5 minutes with no inbound or outbound activity.
-- Server restart: the connection drops cleanly with code 1001
-  ("going away"). Reconnect after a backoff.
+| code | when | fix |
+|---|---|---|
+| `subscription_scope_denied` | topic doesn't match key's scopes | add `event:subscribe:<topic-prefix>` |
+| `subscription_too_many` | > 64 topics | use wildcard |
+| `ws_idle_disconnect` | no pong for 60s | respect ping |

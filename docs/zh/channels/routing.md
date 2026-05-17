@@ -1,75 +1,102 @@
+---
+kind: concept
+title: 多会话路由
+tldr: channel 里回复时,opendray 按优先级选目标会话 — reply-to-message > /select 固定 > 最近通知。Slash 命令永远优先于路由。
+status: stable
+since: v0.1.0
+topic: channels
+related:
+  - channels/overview
+  - channels/notifications
+references:
+  capabilities: [channels, sessions]
+x-implementation:
+  - internal/channel/router.go
+  - internal/channel/commands.go
+---
+
 # 多会话路由
 
-当你同时运行 3+ 个会话时,回复到 "正确那个" 至关重要。opendray 用以下优先级为入站非命令消息选定目标会话:
+> **tldr:** channel 里回复时,opendray 按优先级选目标会话 —— reply-to-message > `/select` 固定 > 最近通知。Slash 命令永远优先于路由。
 
-| 优先级 | 来源 | 触发 |
+## 路由优先级
+
+| # | 来源 | 触发 |
 |---|---|---|
-| 1 | reply-to-message | 长按通知 → Reply(Telegram、Slack 线程、Discord ref、飞书 reply) |
-| 2 | `/select <sid>` 锁定 | 显式斜杠命令 |
-| 3 | 最后通知的会话 | 回退 — 此频道上最近的通知 |
+| 1 | Reply-to-message | 长按通知 → 回复(Telegram / Slack 线程 / Discord ref / 飞书回复) |
+| 2 | `/select <sid>` 固定 | 显式 slash 命令固定 |
+| 3 | 最近通知会话 | 兜底 —— 该 channel 上最近一条通知的目标 |
 
-## reply-to-message 路由(最佳 UX)
+## Reply-to-message(最佳 UX)
 
-每个 chat 平台都支持 "回复某条特定消息" — 长按 / 右键 → Reply。opendray 从入站载荷捕获被引用的消息 id,并在 `(channel, outbound_msg_id) → session_id` 的内存索引中查找。
+所有支持平台都提供"回复指定消息"(长按 / 右键 → 回复)。opendray
+从入站 payload 抓取引用消息 ID,在 `(channel, outbound_msg_id) →
+session_id` 的内存索引里查找。
 
-只要原始通知消息还在 chat 历史中(通常都在 — 平台不会自动删除),回复它就会把你的文本路由到该特定会话。
+```
+索引大小:  每 channel 保留最近 ~256 条出站通知
+淘汰策略:  LRU
+fallback: 索引淘汰后 → /select 固定 → 最近通知
+```
 
-索引保留每个频道最近约 256 个出站通知,超出按 LRU 淘汰。老的空闲通知(几周前)最终会丢出 — 这时回复会回退到优先级 2 或 3。
+## Slash 命令
 
-![Telegram long-press reply](/tutorial/routing-reply-to-message.png)
-
-## `/select` 显式锁定
-
-当你打算给同一个会话连发多条消息时,先锁定一次:
+| 命令 | 用途 | 示例输出 |
+|---|---|---|
+| `/sessions` | 列该 channel 上最近通知的会话 | `← /select` 标记固定项,`(last)` 标记最近 |
+| `/select <sid>` | 固定一个会话给后续回复 | `Now routing replies to session ses_abc123` |
+| `/select clear` | 取消固定 → 回退到最近通知 | `Pinned session cleared` |
+| `/cancel <sid>` | SIGTERM 终止会话 | `Session ses_abc123 terminated` |
+| `/help` | 列可用命令 | (命令目录) |
+| `/notify off` / `/notify on` | 静音 / 取消静音 channel | (见 [notifications](./notifications)) |
+| `/status` | 显示 channel + session 计数 | `2 channels running, 3 sessions live` |
 
 ```
 /select ses_abc123
 → Now routing replies to session ses_abc123. Use /select clear to unpin.
 ```
 
-后续的非命令文本就路由到那个会话,覆盖*最后通知*的回退。
-
-解除锁定:
-
-```
-/select clear
-→ Pinned session cleared. Routing falls back to last-notified.
-```
-
-## `/sessions` 查找 ID
-
-会话 id 没记住?运行:
-
-```
-/sessions
-→ Recently-notified sessions (most recent first):
-    /select ses_xyz789 ← /select
-    /select ses_abc123 (last)
-    /select ses_old456
-
-   Tip: replying to a notification routes to *that* session directly.
-```
-
-标记 `← /select` 显示当前锁定的是哪个;`(last)` 显示最近通知目标。每行就是字面的斜杠命令,点击可以复制粘贴到输入栏。
-
-## 字节去了哪里
+## 字节流向
 
 确定路由目标后,opendray:
 
-1. 通过 `Manager.Input(sid, payload)` 把你的文本 + 一个尾随 `\r`(carriage return — Enter)转发到会话的 stdin。
-2. 清除该会话的 *Once* 模式抑制条目,这样下次 idle 事件会再次通知。
-3. 发布 `channel.message_forwarded` 事件用于审计。
+| # | 步骤 | 源 |
+|---|---|---|
+| 1 | 把文本 + 末尾 `\r`(Enter)写进会话 stdin | `Manager.Input(sid, payload)` |
+| 2 | 清除该会话的 once-mode 压制 | `internal/channel/notify.go` |
+| 3 | 发布 `channel.message_forwarded` 事件做审计 | `internal/eventbus/` |
 
-`\r` 关键:在 raw 模式运行的 TUI(Claude Code、Codex、Gemini)把 `\r` 视为 Enter(提交),`\n` 视为 shift-Enter(插入换行)。发 `\n` 会把文本放进输入框但不提交。
+`\r` 关键:raw mode 下的 TUI(Claude Code、Codex、Gemini)把 `\r`
+当 Enter(提交),`\n` 当 shift-Enter(插入换行)。发 `\n` 只把文本
+放进输入框,不提交。
 
-## 斜杠命令总是覆盖路由
+## Slash 命令永远优先
 
-任何被解析为斜杠命令的文本(`/help`、`/cancel`、`/notify`、`/select`、`/sessions`、`/status`,以及 app 注册的任何自定义命令)完全跳过路由,直接走命令派发器。回复落在同一个 chat 里,但永远不会触碰会话的 stdin。
+任何文本如果解析成 slash 命令(`/help`、`/cancel`、`/notify`、
+`/select`、`/sessions`、`/status`,加上 app 注册的自定义命令)
+都跳过路由,走命令分发器。回复落在同一聊天但不进会话 stdin。
 
-这就是为什么 `/cancel ses_abc` 不会意外地把 "/cancel ses_abc" 打到 Claude 的输入框里。
+这就是为什么 `/cancel ses_abc` 不会意外地往 Claude 输入框里打
+"/cancel ses_abc"。
 
-## 失败模式
+## Errors
 
-- **"Could not deliver to ses_xxx: session not found"** — 锁定的会话已结束。用 `/sessions` 找一个活跃的并再次 `/select`,或者直接发一条新的非命令消息回退到最后通知。
-- **路由到错误的会话** — 通常是因为*最近*的通知来自和你想发的不同的会话。用 reply-to-message 或 `/select`。
-- **Reply-to-message 返回 "Could not deliver: session ended"** — 消息路由到了正确的会话但它不再运行。通过 web UI 或 `/spawn-like ses_xxx` 重启它。
+| code / 消息 | 原因 | 修复 |
+|---|---|---|
+| `Could not deliver to ses_xxx: session not found` | 固定会话已结束 | `/sessions` → `/select <new-sid>` 或发非命令(走最近通知 fallback) |
+| `Could not deliver: session ended`(reply-to-message 后) | 消息路由对了但会话已结束 | 在 web UI 重启,或 `/spawn-like ses_xxx` |
+| 路由到错的会话 | 最近通知是不同会话发的 | 用 reply-to-message 或 `/select` 固定 |
+
+![Telegram 长按回复](/tutorial/routing-reply-to-message.png)
+
+<details>
+<summary>📖 叙事说明</summary>
+
+只要原通知消息还在聊天历史里(通常是 —— 平台不会自动删),回复它
+就路由到那个会话。索引保留每 channel 最近 ~256 条出站通知,LRU 淘汰。
+老 idle 通知(几周前)最终会淘汰,那时回复落到优先级 2 或 3。
+
+如果你要给同一个会话连发多条,先 `/select` 固定一次,后续就不用每条
+都长按。`/sessions` 列候选,每行带 tap-to-copy 的 `/select ses_xyz`。
+
+</details>

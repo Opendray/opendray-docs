@@ -1,0 +1,91 @@
+{
+  "$schema": "https://docs.opendray.dev/capabilities/_meta.schema.json",
+  "subsystem": "integrations",
+  "version": "1.0.0",
+  "stability": "stable",
+  "description": "Reverse proxy + scoped API keys + event WebSocket for external apps that consume opendray.",
+  "since": "v0.1.0",
+  "implementation": "internal/integration/",
+  "use_case": "Personal apps (pettracker, materialscout, shoponline) register here, get scoped API keys, and call opendray's session/memory/channel APIs — sharing one Claude Pro subscription instead of paying per-token to vendors.",
+  "scopes": [
+    {
+      "id": "session:read",
+      "description": "Read session metadata and tail PTY output"
+    },
+    {
+      "id": "session:write",
+      "description": "Spawn / write stdin / terminate sessions"
+    },
+    {
+      "id": "channel:read",
+      "description": "List channels and check connection status"
+    },
+    {
+      "id": "channel:send",
+      "description": "Send an ad-hoc message through a channel"
+    },
+    {
+      "id": "memory:read",
+      "description": "Query the memory store"
+    },
+    {
+      "id": "memory:write",
+      "description": "Write into project / global memory scopes"
+    },
+    {
+      "id": "event:subscribe:session.*",
+      "description": "Subscribe to session events over the integration events WS"
+    },
+    {
+      "id": "event:subscribe:channel.*",
+      "description": "Subscribe to channel events over the integration events WS"
+    },
+    {
+      "id": "event:subscribe:memory.*",
+      "description": "Subscribe to memory events over the integration events WS"
+    }
+  ],
+  "reverse_proxy": {
+    "mount_path_pattern": "/api/v1/proxy/{prefix}/*",
+    "injects_headers": [
+      "X-Integration-ID",
+      "X-OpenDray-Forwarded-For",
+      "X-OpenDray-API-Version"
+    ],
+    "strips_headers": ["Authorization (incoming)"],
+    "max_request_body_bytes": 10485760,
+    "max_response_body_bytes": 10485760
+  },
+  "events_ws": {
+    "url": "/api/v1/integrations/_events",
+    "auth": "Bearer integration key",
+    "subscribe_message": {
+      "type": "subscribe",
+      "topics": ["session.*", "channel.*", "memory.*"]
+    },
+    "keepalive_seconds": 25,
+    "max_topics_per_connection": 64
+  },
+  "health_probe": {
+    "interval_seconds": 30,
+    "expected_endpoint": "GET / on integration base_url",
+    "expected_response_schema": {
+      "status": "ok|degraded|down",
+      "version": "string",
+      "busy_ratio": "float 0..1",
+      "queue_depth": "int"
+    },
+    "unhealthy_threshold": 2,
+    "behavior_when_unhealthy": "503 Service Unavailable on proxy paths; subscriptions still receive events"
+  },
+  "key_rotation": {
+    "supported": true,
+    "grace_period_seconds": 86400,
+    "old_key_behavior_during_grace": "still valid, audit-tagged 'rotated_pending'"
+  },
+  "call_log": {
+    "implementation": "internal/integration/calllog.go",
+    "table": "integration_call_log (separate from audit_log for volume)",
+    "fields": ["timestamp", "integration_id", "direction", "method", "path", "status", "latency_ms", "resource_kind", "resource_id"]
+  }
+}

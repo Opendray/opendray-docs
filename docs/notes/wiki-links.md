@@ -1,74 +1,79 @@
+---
+kind: capability
+title: Wiki links + backlinks
+tldr: '[[note-name]] syntax. Resolves by filename (case-insensitive, ignores path). Autocomplete on [[. Right-pane shows incoming backlinks. Re-computed on save.'
+status: stable
+since: v0.1.0
+topic: notes
+related: [notes/overview, notes/editor]
+capability: [wiki-link, autocomplete, backlinks, broken-link-detection]
+inbound: editor-input
+outbound: file-write
+x-implementation: [internal/notes/wikilink.go]
+---
+
 # Wiki links + backlinks
 
-Wiki links are how Obsidian-style vaults stay connected. Type
-`[[Other Note]]` in any note → it becomes a clickable link to
-the matching file. Every note pointing at the current one shows
-in the Backlinks pane.
+> **tldr:** `[[note-name]]` syntax. Resolves by filename (case-insensitive, ignores path). Autocomplete on `[[`. Right-pane shows incoming backlinks. Re-computed on save.
 
-## Creating a link
+## Syntax
 
-Inside the source-mode editor, type `[[`. opendray's caret
-detection notices this and pops up a suggestion list of every
-note title in the vault, fuzzy-matched against what you type
-after the brackets.
-
-![Wiki link suggestions popup](/tutorial/notes-wiki-link-suggest.png)
-
-- **↑ / ↓** to highlight a candidate
-- **Enter** or **Tab** to insert
-- **Esc** to dismiss without inserting
-
-The inserted text is `[[Note Title]]`. Saving the note triggers
-a backlink-graph rebuild (incremental — only the affected files
-re-scan).
+| Pattern | Example | Resolves to |
+|---|---|---|
+| `[[name]]` | `[[opendray-positioning]]` | first `*.md` with basename `opendray-positioning` |
+| `[[name\|display]]` | `[[opendray-positioning\|see positioning notes]]` | same target, custom display |
+| `[[name#heading]]` | `[[design-doc#mission]]` | scrolls to heading after open |
+| `![[name]]` | `![[diagram.png]]` | embed image / pdf transclude |
 
 ## Resolution rules
 
-When the renderer encounters `[[X]]`:
+| Rule | Behaviour |
+|---|---|
+| Case-insensitive | `[[notes]]` matches `Notes.md` |
+| Path-agnostic | `[[design]]` matches `archive/design.md` if no closer match |
+| Closer = wins | sibling > parent > root > anywhere |
+| Multiple matches | first-by-path-depth then alphabetical |
+| No match | rendered as red broken-link with hover hint |
 
-1. Look for a file `X.md` anywhere in the vault.
-2. If multiple matches, prefer one in the same directory.
-3. If still ambiguous, take the alphabetically-first.
-4. If no match, the link renders as a "stub" with a dashed
-   border — clicking it offers to create the note.
+## Autocomplete
 
-This matches Obsidian's behaviour, so notes round-trip cleanly
-between the two.
+| Trigger | Behaviour |
+|---|---|
+| Type `[[` | dropdown shows recent + frequent notes |
+| Continue typing | filters by fuzzy match |
+| Press Tab/Enter | inserts selected |
+| Press Esc | dismisses |
+| Press `\|` after match | switches to "type display label" mode |
 
-## Backlinks pane
+## Backlinks (right pane)
 
-The right side of the note editor shows every other note that
-contains `[[<this note's title>]]`. Click any backlink → opens
-that note → its backlinks pane shows the chain.
+| Where | What |
+|---|---|
+| Editor right pane | "Linked from" — every other note that `[[`-links to this one |
+| Hover backlink | preview of the linking line |
+| Click backlink | jumps to that note + scrolls to the link |
+| Empty state | "No backlinks yet" |
 
-Useful patterns:
+## Broken-link detection
 
-- **Tag-style indices.** Create a note `Decisions Index.md` that
-  every decision references. Every decision back-links here, so
-  you have a one-stop view.
-- **Project root.** Each project folder gets a `_README.md` that
-  individual notes link to. The README's backlinks are the full
-  project file list — ad hoc, but works.
+| Where | Behaviour |
+|---|---|
+| Editor render | broken `[[xxx]]` shown in red |
+| Hover | tooltip "No matching note — click to create" |
+| Click | creates `xxx.md` in same directory, opens for editing |
+| Bulk audit | `opendray notes audit` CLI lists every broken link in vault |
 
-## Aliases (alt text)
+## Index lifecycle
 
-Wiki links support `|alias` for displayed text:
+| Event | What happens |
+|---|---|
+| File saved | wiki links re-extracted, backlink index updated |
+| File renamed (Obsidian-style) | all `[[old-name]]` rewritten to `[[new-name]]` |
+| File deleted | backlinks to it become broken; flagged |
 
-```
-[[2026-Q2 Roadmap|the roadmap]]
-```
+## Errors
 
-Renders as "the roadmap" but still links to and back-links from
-`2026-Q2 Roadmap.md`. opendray honours the alias for display
-only — the backlink graph uses the canonical title.
-
-## Limitations vs Obsidian
-
-- **No nested links** (`[[X|[[Y]]]]`) — flatten them.
-- **No section anchors yet** (`[[X#section]]`) — you can write
-  them but they resolve to the file, not the heading.
-- **No embed transclusion** (`![[X]]`) — opendray renders a
-  link instead of embedding the body. Future feature.
-- **Graph view** is not in opendray (only the Backlinks pane
-  per note). For a global graph, open the vault in Obsidian
-  itself.
+| code | when | fix |
+|---|---|---|
+| `wikilink_target_collision` | two `.md` with same basename in different dirs and link is ambiguous | use the longer `[[archive/name]]` form |
+| `wikilink_circular_embed` | `![[a.md]]` inside `a.md` | edit one of them |

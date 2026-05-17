@@ -1,81 +1,112 @@
+---
+kind: capability
+title: 移动端 Git 工作流
+tldr: Flutter app 以触摸优先布局镜像 web Git tab。底部 sheet 分支选择器、stage-all 提交、polling 频率为移动 radio 调优。同一组 gateway 路由。
+status: stable
+since: v0.1.0
+topic: sessions
+related:
+  - sessions/git-workflow
+  - sessions/inspector
+capability:
+  - branch-checkout
+  - stash-and-switch
+  - commit
+  - push
+  - pr-list-create-merge
+  - check-polling
+x-implementation:
+  - app/mobile/lib/features/git/
+---
+
 # 移动端 Git 工作流
 
-移动 app 以触摸优先的布局镜像 web 的 [Git workflow](#02-sessions-07-git-workflow)。本节中所有内容都是移动端 UI 对应 web Git 标签的等价物 — 网关路由完全相同,所以两个客户端可以同时操作同一个仓库而不会互相踩到。
+> **tldr:** Flutter app 以触摸优先布局镜像 [web Git tab](./git-workflow)。底部 sheet 分支选择器、stage-all 提交、polling 频率为移动 radio 调优。同一组 gateway 路由。
 
-在 **Session detail → Git 标签**(inspector 页面顶部的第二个胶囊)下打开。
+## 入口
 
-## 状态面板
+**Session 详情 → Git tab**(inspector 页顶部第二个 pill)。
 
-头部呼应 web 标签:当前分支 + 上游,ahead/behind 计数,工作树文件数。点击工作树这一行展开到文件列表。
+## 状态 pane
 
-## 分支选择器(底部弹层)
-
-点击当前分支的胶囊会打开一个**底部弹层**,占视口的 75% — 手机屏幕上没空间放 web 的下拉框,而弹层给每个分支留出空间显示其上游副标题和删除控件。
-
-| 区域 | 列出的内容 |
+| 元素 | 来源 |
 |---|---|
-| **Local** | 每一个 `refs/heads/*` 引用。当前分支固定在顶部带勾选图标;其余按字母顺序。 |
-| **Remote** | 每一个 `refs/remotes/<remote>/*` 引用,除了 `HEAD` symref。点一个 remote 引用会 checkout 同名的本地分支(等价于 `git checkout <name>` 的 remote-tracking 快捷方式)。 |
+| 当前分支 + upstream | `GET /git/status` |
+| Ahead / behind 计数 | 同上 |
+| 工作树文件数 | 同上 |
+| 点工作树行 | 展开到文件列表 |
 
-每一行:
+## 分支选择器(底部 sheet,75% 视口)
 
-- **点击**该行 → checkout 那个分支。
-- **点击右侧的垃圾桶图标** → 删除分支(当前分支上禁用)。
+| Section | 列出 |
+|---|---|
+| **Local** | 所有 `refs/heads/*`;当前置顶带 ✓;其余按字母 |
+| **Remote** | 所有 `refs/remotes/<remote>/*` 除 HEAD symref;点 → checkout 同名 local |
 
-"+ New" 和 "Push" 按钮位于操作条上,与胶囊并排,所以从任意屏幕都只需一次点击执行常用操作。
+| 点击 | 动作 |
+|---|---|
+| 行 | checkout 该分支 |
+| 垃圾桶图标 | 删分支(在当前分支上禁用) |
+| chip 行 "+ New" / "Push" | 一键常用操作 |
 
 ### Stash & switch
 
-如果点击分支时工作树有未提交改动,服务器返回 409 + 一个 `dirty_files` 数组。移动端 UI 打开一个 AlertDialog 显示文件列表(可滚动,等宽字体)并附两个按钮:
+| # | 步骤 |
+|---|---|
+| 1 | 脏树点分支 → 服务端 409 + `dirty_files` |
+| 2 | AlertDialog 显示文件列表(滚动,等宽) |
+| 3 | **Cancel** = 不动树 / **Stash & switch** = `git stash push --include-untracked` + checkout |
+| 4 | Snackbar:`Switched to <name> (stashed as abc1234)` |
+| 5 | 终端恢复:`git stash pop` |
 
-- **Cancel** — 不动树。
-- **Stash & switch** — 自动 stash 树(`git stash push --include-untracked`)并切换。
+### 删除带 force 回退
 
-成功后一个 Snackbar 提示确认 `Switched to <name> (stashed as abc1234)`。之后从终端用 `git stash pop` 恢复 stash。
+| 默认 | `-d`(安全) |
+|---|---|
+| "not fully merged" 时 | 第二个 AlertDialog:`Force delete? Branch is not fully merged. Forcing deletion will lose any commits unique to this branch.` |
+| 确认 | 升级为 `-D` |
 
-### 带强制回退的删除
+两步 gating 防误操作。
 
-默认 `-d`。如果 git 因 "not fully merged" 拒绝,服务器返回 409,UI 会弹出**第二个**对话框 — "Force delete? Branch is not fully merged. Forcing deletion will lose any commits unique to this branch."。确认会把调用升级到 `-D`。两步把关意味着误操作不会一键炸掉工作。
+## Commit 表单
 
-## 提交表单
-
-文件列表下方是一个简化表单:
-
-- **Stage all** 按钮 — 移动端没有按文件 stage 的 UI(没有 hover 目标)。如果需要更细粒度控制,从 web inspector 或终端管理单个文件。
-- **多行消息**字段 — 软键盘暴露了一个 Enter 按钮(单独添加),所以换行能用,不必去工具栏找。
-- **Commit** 按钮 — 暂存内容为空时禁用。
-
-提交后,文件列表和状态头从服务器刷新。
+| 字段 | 移动行为 |
+|---|---|
+| 单文件 stage UI | ✗(无 hover 目标)—— 用 web 或终端做精细索引控制 |
+| **Stage all** 按钮 | 可用 |
+| 多行 message | 软键盘暴露 Enter 按钮 |
+| **Commit** 按钮 | staged 前禁用 |
+| 成功后 | 刷新文件列表 + 状态头 |
 
 ## Pull request
 
-提交表单下方是 **PR 区域**:
+| 元素 | 行为 |
+|---|---|
+| PR 列表 | 开 PR,60s polling |
+| **+ Create** | 底部 sheet 表单(title / body / base 默认分支解析) |
+| 点 PR 行 | 内联展开 → checks(展开时 30s polling)+ merge 表单 |
+| Merge 方法 | merge / squash / rebase |
+| Delete branch on merge | 复选框,默认 ON |
 
-- 可滚动的开放 PR 列表,每 60 秒轮询一次。
-- **+ Create** 打开一个底部弹层表单(title / body / base,默认分支由 host 解析)。
-- 点击一个 PR 行展开内嵌面板,显示 check 运行(展开时每 30 秒轮询一次)和合并表单。
+## Polling 频率
 
-合并表单的选项与 web 一致:方法(merge / squash / rebase)和默认为**开**的 "delete branch on merge" 复选框。
-
-## 轮询节奏总结
-
-移动 app 比 web 轮询更激进,因为 iOS 上还没有事件总线订阅:
-
-| 来源 | 节奏 | 何时停止 |
+| 来源 | 频率 | 停止时机 |
 |---|---|---|
-| 分支列表 | 打开时 + 任意分支操作后 | 标签卸载 |
-| 状态 / 文件列表 | 8 秒 | 标签卸载 |
-| PR 列表 | 60 秒 | 标签卸载 |
-| PR checks(展开行) | 30 秒 | 行折叠 |
+| 分支列表 | 打开时 + 任意分支操作后 | tab unmount |
+| 状态 / 文件列表 | 8s | tab unmount |
+| PR 列表 | 60s | tab unmount |
+| PR checks(展开行) | 30s | 行折叠 |
+| 手动刷新 | 列表上下拉 | —— |
 
-这些间隔被调过,既感觉"实时"又不浪费手机的射频。如果你插着电想要更快更新,在列表上用下拉触发手动刷新。
+移动 polling 比 web 更激进,因为 iOS 还没 event bus 订阅。频率调到
+"live" 感而不烧 radio。
 
-## 与 web 的差异
+## 跟 web 的能力差距
 
-Web Git 标签有一些移动端还没镜像的能力:
+| Web 有 | 移动有 | 这些用 web/终端 |
+|---|---|---|
+| 单文件 stage / unstage 按钮 | 仅 stage-all | 精细索引控制 |
+| Diff 抽屉(点击展开 unified diff) | 仅 porcelain 状态码 | 看 diff |
+| Force-with-lease push(opt-in 复选框) | 仅安全 push | `--force-with-lease` |
 
-- **按文件 stage** — web 在每个变更路径旁有 stage/unstage 按钮。移动端目前只支持 stage all。
-- **Diff 抽屉** — web 在点击时打开统一 diff。移动端只显示 porcelain 状态码;查看 diff 需要 web 或终端。
-- **Force-with-lease 推送** — web 有一个 opt-in 复选框。移动端推送总是使用安全路径。
-
-其它所有功能(分支、PR、stash & switch 等)都是对等的。
+其他功能(分支、PR、stash & switch 等)都对等。

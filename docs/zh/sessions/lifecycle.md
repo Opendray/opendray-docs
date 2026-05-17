@@ -1,73 +1,125 @@
+---
+kind: concept
+title: 会话生命周期
+tldr: STARTING → RUNNING ↔ IDLE → STOPPED / ENDED / FAILED。Idle = N 秒无输出(默认 30s),进程仍活。Restart 用同 provider/cwd/args 在新 session id 下重 spawn。
+status: stable
+since: v0.1.0
+topic: sessions
+related:
+  - sessions/overview
+  - sessions/spawning
+  - channels/notifications
+references:
+  capabilities: [sessions]
+x-implementation:
+  - internal/session/state.go
+  - internal/session/reconcile.go
+---
+
 # 会话生命周期
 
-每个会话会经过一个小型状态机。终端面板顶部的状态标签告诉你它当前的位置。
+> **tldr:** `STARTING → RUNNING ↔ IDLE → STOPPED / ENDED / FAILED`。**Idle** = N 秒无 stdout(默认 30s),进程仍活。**Restart** 用同 provider / cwd / args 在新 session id 下重 spawn。
+
+## 状态机
 
 | 状态 | 含义 | 你能做什么 |
 |---|---|---|
-| **STARTING** | DB 行已插入,PTY 正在 spawn | 等待 — 通常 <500ms |
-| **RUNNING** | 进程存活,最近有 stdout 活动 | 在终端里输入 |
-| **IDLE** | 进程存活,静默 ≥30 秒(可配置) | 正常回复;idle 只是一个事件信号 |
-| **STOPPED** | 操作员点 ✕ → SIGTERM → 进程退出 | 查看回滚;**Restart** 会以同一个 id 重新启动 |
-| **ENDED** | 进程自行退出 | 查看回滚;**Restart** 重新启动 |
-| **FAILED** | spawn 或运行时错误,未能干净退出 | 检查对话框错误 / 日志;不修配置通常无法恢复 |
+| `STARTING` | DB row 已插入,PTY 正在 spawn | 等 —— 通常 <500ms |
+| `RUNNING` | 进程活,最近有 stdout 活动 | 在终端里输入 |
+| `IDLE` | 进程活,沉默 ≥30s(可配) | 正常回复;idle 只是信号 |
+| `STOPPED` | 操作员点 ✕ → SIGTERM → 进程退 | 看 scrollback;Restart 在同 id 下重启 |
+| `ENDED` | 进程自己退 | 看 scrollback;Restart 重启 |
+| `FAILED` | 启动或运行时错误,未正常退 | 看日志;通常要改配置 |
 
-## 进入空闲
-
-空闲就是 "N 秒内没有 stdout" — 进程仍然存活并在监听。opendray 用空闲作为一个信号在事件总线上触发 `session.idle`,这会:
-
-- [Channels](#channels-overview) 按其 `notify_on` 过滤推送通知
-- 状态标签变成 `IDLE`(黄色)
-- CLI 发出的下一个字节会把状态翻回 `RUNNING`
-
-阈值(默认 30 秒)和监视器轮询间隔(默认 5 秒)在 `config.toml` 的 `[session]` 里。阈值越低 = 通知越多,阈值越高 = 错过短暂停顿。
-
-> 频道还有自己的每频道通知策略叠加在上面 — 见 Channels 下的 *Notifications panel deep-dive* 章节,里面有 `once` / `cooldown` / `every` 模式。
-
-## 停止一个会话
-
-会话离开 `RUNNING` 有三种方式:
-
-### 操作员停止(× 按钮)
-
-点击运行中标签上的 × → 确认对话框 → opendray 发送 **SIGTERM**,等 3 秒,如果进程还活着再发 **SIGKILL**。状态翻到 `STOPPED`,环形缓冲区保留供回看。
-
-### 进程退出
-
-CLI 自行退出 — `q` / `Ctrl-D` / 脚本的 `exit 0` / panic。opendray 捕获退出码,把行标为 `ENDED`(填充 `exit_code`),在事件总线发布 `session.ended`。
-
-如果 `exit_code != 0`,渲染 session.ended 卡片的频道会显示**红色**色彩模板。
-
-### opendray 重启时的对账
-
-opendray 自身重启(新构建、主机重启)时,任何处于非终止状态的行都会被标为 `ENDED`,原因是 `"previous gateway process exited; PTYs gone"`。PTY 无法在父进程死亡后存活,所以行老老实实地反映这一点。
-
-启动日志里你会看到这一行:
+## 转换
 
 ```
-INFO reconciled stale sessions on startup count=N
+STARTING ─→ RUNNING ─→ IDLE
+              ↑          │
+              └──────────┘  (CLI 下一个字节)
+              │          │
+              ├──→ ENDED ←┤  (CLI 自己退)
+              │
+              └──→ STOPPED   (操作员 ✕ → SIGTERM → 3s 后 SIGKILL)
+
+STARTING ─→ FAILED          (cmd.Start 错)
 ```
 
-## 从已停止的会话重启
+## Idle 语义
 
-Restart 按钮(在 stopped/ended 标签上可见)会用相同的下列字段重跑 spawn 流程:
+| 方面 | 值 |
+|---|---|
+| 默认阈值 | 30s 无 stdout |
+| Watcher poll 间隔 | 5s |
+| 配置 key | `[session].idle_threshold` / `[session].idle_poll_interval` in `config.toml` |
+| Idle 时行为 | 发 `session.idle` 到 event bus;状态徽章变黄 |
+| 下个字节时行为 | 发 `session.running`;状态徽章变绿 |
+| Channels 转发 | 按 [Notifications 面板](../channels/notifications) 的 `repeat_policy` |
 
-- Provider id
-- 工作目录
-- 参数
-- Claude 账号绑定
-- 父会话 id
+## 停止模式
 
-但分配**新的会话 id**。老的行留在 DB 里用于审计。Inspector 链接的笔记会跟到新会话,因为它按文件路径而非会话 id 标识。
+### 操作员停止(✕ 按钮)
 
-## 关闭标签
+| # | 步骤 |
+|---|---|
+| 1 | 发 `SIGTERM` |
+| 2 | 等 3 秒 |
+| 3 | 还活就 `SIGKILL` |
+| 4 | 状态 → `STOPPED`;ring buffer 保留 |
 
-**已结束**标签上的 × 按钮视觉上关闭标签,但**保留 DB 行**。可以通过 Sessions 列表顶部的 *History* 过滤器找到旧会话。
+### 自己退
 
-要真正从数据库删除一个会话行,用 API:
+| 原因 | 状态 | exit_code |
+|---|---|---|
+| `q` / `Ctrl-D` / `exit 0` | `ENDED` | `0` |
+| 脚本 `exit 1` | `ENDED` | `1` |
+| panic | `ENDED` | `1`(或被信号杀的 code) |
+| segfault | `ENDED` | `139` |
+
+`exit_code != 0` 时,channel `session.ended` 卡片渲染 **红色**。
+
+### opendray 重启时 reconcile
+
+| 触发 | 结果 |
+|---|---|
+| opendray 二进制重启 | 非终态行 → `ENDED`,原因 `"previous gateway process exited; PTYs gone"` |
+| 主机重启 | 同上 |
+| 启动日志 | `INFO reconciled stale sessions on startup count=N` |
+
+PTY 不能在父进程死亡后存活,行如实标记。
+
+## 从 stopped/ended 重启
+
+Restart 按钮(在 stopped/ended tabs 上)用以下相同字段重跑 spawn:
+
+| 保留 | 新 |
+|---|---|
+| `provider_id` | `session_id` |
+| `cwd` | |
+| `args` | |
+| `claude_account_id` | |
+| `parent_session_id` | |
+
+旧行留在 DB 做审计。Inspector linked note 跟到新 session,因为它按
+文件路径 key,不按 session id。
+
+## 关闭 vs 删除
+
+| 动作 | 效果 |
+|---|---|
+| ✕ 在 ended tab 上 | 视觉上关 tab;DB row 保留(在 Sessions History 过滤器里能找到) |
+| `DELETE /api/v1/sessions/<sid>` | 真删除 DB 行 |
+
+Web admin 故意不暴露破坏性删除按钮 —— 误点会丢失审计上下文。
 
 ```bash
 curl -X DELETE -H "Authorization: Bearer $ADMIN_TOKEN" \
   http://localhost:8770/api/v1/sessions/<sid>
 ```
 
-Web 管理后台故意不暴露破坏性删除按钮 — 误点会丢失审计上下文。
+## Errors
+
+| code | http | 原因 | 修复 |
+|---|---|---|---|
+| `session_terminated` | 410 | 向已 ended/stopped 会话发输入 | 先 restart 或新会话 |
+| `session_failed_to_start` | 500 | `cmd.Start` 错 | 检查 provider 配置 + 日志 |

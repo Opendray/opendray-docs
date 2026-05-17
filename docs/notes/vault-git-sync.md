@@ -1,122 +1,88 @@
+---
+kind: capability
+title: Vault git sync
+tldr: Optional. Vault is a git repo. opendray auto-commits + pushes on a schedule. Pull on session spawn. Merge conflicts surface in UI with manual-resolve.
+status: stable
+since: v0.1.0
+topic: notes
+related: [notes/overview, backup/overview]
+capability: [git-auto-commit, git-auto-push, conflict-surface, branch-per-host]
+inbound: file-watcher
+outbound: git
+x-implementation: [internal/notes/gitsync.go]
+---
+
 # Vault git sync
 
-opendray can auto-commit + push the entire notes vault to a
-remote git host on a timer. This is how the vault stays
-consistent across multiple opendray hosts (laptop ↔ home server)
-and how you avoid losing notes when a single host dies.
+> **tldr:** Optional. Vault is a git repo. opendray auto-commits + pushes on a schedule. Pull on session spawn. Merge conflicts surface in UI with manual-resolve.
 
-## Prerequisites
+## Setup
 
-- `git` available on the opendray host (`which git` returns a
-  path).
-- The vault root has a `.git` directory **or** opendray will
-  `git init` on first run.
-- A remote configured:
-  - SSH: standard `git@github.com:...` URL with the host's SSH
-    key trusted.
-  - HTTPS: a [Git host token](#plugins-git-hosts) configured in
-    Plugins → Git hosts so opendray can authenticate
-    non-interactively.
+| # | Action |
+|---|---|
+| 1 | Make `<vault>` a git repo: `cd <vault> && git init && git remote add origin <url>` |
+| 2 | Configure auth: SSH key or PAT in `Settings → Notes → Git auth` |
+| 3 | Enable sync: `Settings → Notes → Auto-sync = on` |
+| 4 | Choose schedule + branch + commit author |
 
-## Configuring auto-sync
-
-`config.toml`:
+## Config
 
 ```toml
-[notes]
-root = "~/.opendray/vault"
-git_root = "~/.opendray/vault"
-
-[notes.sync]
-enabled = true
-interval = "5m"           # commit every 5 minutes when there are changes
-push_on_commit = true     # also push to origin after a commit
-remote = "origin"
-branch = "main"
-author_name  = "opendray"
-author_email = "opendray@example.com"
+[notes.gitsync]
+enabled       = true
+remote        = "origin"
+branch        = "main"               # or "host-<hostname>" for per-host branches
+commit_author = "opendray <bot@opendray.dev>"
+auto_commit_schedule = "*/15 * * * *"  # cron — every 15 min
+auto_push_schedule   = "*/30 * * * *"  # cron — every 30 min
+pull_on_session_spawn = true
 ```
 
-After save + opendray restart, the syncer logs:
+## Per-host branch pattern (recommended for multi-device)
 
-```
-INFO vault auto-sync started component=vaultgit.sync interval=5m
-```
-
-## What the syncer does
-
-Every `interval`:
-
-1. `git status --porcelain` — any pending changes?
-2. If yes:
-   - `git add .`
-   - `git commit -m "vault sync: <N> file(s) changed"`
-3. If `push_on_commit` and we just committed:
-   - `git push <remote> <branch>`
-4. If `behind` upstream (commits exist on remote that we don't):
-   - `git pull --rebase <remote> <branch>` (best-effort; on
-     conflict, falls back to a full clone-replace as a recovery
-     mechanism — the conflict file is kept as `<name>.conflict.md`)
-
-The cycle's outcome publishes `vaultgit.sync_completed` on the
-event bus so external monitoring can react.
-
-## Status indicators
-
-The Notes page shows a sync status pill at the top:
-
-| Pill | Meaning |
+| Device | Branch |
 |---|---|
-| 🟢 *In sync* | local matches remote, no pending changes |
-| 🟡 *Pending commit* | changes since last commit; will commit at next tick |
-| 🔵 *Pushing…* | mid-sync (push in progress) |
-| 🔴 *Conflict* | rebase failed; a `.conflict.md` file was created |
+| Desktop opendray | `host-mac-studio` |
+| Pi at home | `host-pi-home` |
+| LXC at office | `host-lxc-office` |
 
-Click the pill → expand to see last sync time, files changed,
-and a manual *Sync now* button.
+Then on each, `git merge` cross-branches when you want to consolidate.
 
-## Branching
+## Auto-commit message
 
-opendray uses a single branch (default `main`). For per-host
-isolation, point different hosts at different branches:
+```
+opendray-auto: 5 files modified, 2 added
 
-- Host A: `[notes.sync] branch = "main"`
-- Host B: `[notes.sync] branch = "host-b"`
+modified: sessions/s_42.md
+modified: projects/pettracker/architecture.md
+added:    archive/2026-05-17-debugging.md
+```
 
-Then merge between branches manually when you want cross-pollination.
+## Conflict handling
 
-## Manual escape hatches
+| Conflict | UI behaviour |
+|---|---|
+| Both sides modified same file | red banner: "Vault has conflicts" + list |
+| Click conflict file | side-by-side diff editor (ours / theirs / merged) |
+| Resolve + click commit | finalises the merge commit |
 
-The vault is just a git repo — open a shell on the host and use
-git directly any time. opendray's syncer is best-effort and
-doesn't lock the repo; just pause auto-sync (set `enabled =
-false` and reload) before doing anything destructive (like a
-force-push).
+## Capabilities
 
-## Remote auth
+| feature | supported |
+|---|---|
+| Auto-commit on schedule | ✓ |
+| Auto-push on schedule | ✓ |
+| Pull on session spawn | ✓ |
+| Branch per host | ✓ (operator names) |
+| Conflict UI | ✓ |
+| Selective sync (exclude folders) | ✓ via `.opendraygitignore` |
+| Encrypted at rest | ✗ (use [backup](../backup/overview) for that) |
 
-For HTTPS remotes, opendray injects credentials from the **Git
-hosts** plugin (Plugins page). The `Authorization` header is
-attached to push/pull requests. Tokens never reach the worktree
-or the commit log.
+## Errors
 
-For SSH, use whatever SSH key the opendray host already trusts
-— `git push` shells out to system `git` which uses the standard
-agent.
-
-## Things to know
-
-- **Don't put `node_modules/` or build outputs in the vault.**
-  The syncer doesn't auto-`.gitignore` for you. Add a
-  `.gitignore` at the vault root.
-- **Big binary files** (PDFs, images) inflate the repo fast.
-  Use git-lfs (opendray won't fight it) or move binaries
-  outside the vault.
-- **First run after `git init`** has no remote — set one up
-  manually:
-  ```bash
-  cd ~/.opendray/vault
-  git remote add origin git@github.com:me/vault.git
-  git push -u origin main
-  ```
-  After that, opendray's sync takes over.
+| code | when | fix |
+|---|---|---|
+| `git_auth_failed` | bad SSH key / expired PAT | re-configure in Settings → Git auth |
+| `git_conflict_blocks_sync` | unresolved merge conflict | resolve in UI |
+| `git_remote_unreachable` | network | retry; sync resumes on next schedule |
+| `git_uncommitted_local_change` | mid-edit when auto-commit fires | next cycle picks it up |

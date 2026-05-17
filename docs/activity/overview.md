@@ -1,65 +1,53 @@
+---
+kind: concept
+title: Activity — overview
+tldr: tail -f for opendray's system-wide event bus. Every session / channel / memory / notification event scrolls through. Filterable by integration / direction / status / time / topic.
+status: stable
+since: v0.1.0
+topic: activity
+related: [activity/topics-catalogue, integrations/call-log, integrations/events-ws]
+references:
+  capabilities: [integrations]
+x-implementation: [internal/eventbus/, internal/integration/calllog.go]
+---
+
 # Activity — overview
 
-The Activity page is `tail -f` for opendray's **system-wide**
-internal event bus. Every session lifecycle event, every channel
-inbound, every notification fan-out, every integration call
-lands here in real time.
+> **tldr:** `tail -f` for opendray's system-wide event bus. Every session / channel / memory / notification event scrolls through. Filterable by integration / direction / status / time / topic.
 
-> **Not to be confused with:** the **History** tab on the
-> Sessions Inspector, which is a *per-project prompt log* sourced
-> from each CLI's transcript on disk. Activity = events;
-> History = user prompts.
+## Two data sources
 
-## When to use
+| Source | Page tab | What |
+|---|---|---|
+| Event bus | Activity → Events | live stream from `internal/eventbus/`; ephemeral |
+| Call log | Activity → API calls | persisted to `integration_call_log` table |
 
-- Debug "why didn't my Telegram channel notify?" — watch
-  `session.idle` fire, confirm `channel.message_sent` follows.
-- Confirm a slash command was received — look for
-  `channel.command_received` with your command name.
-- Trace tool-forwarding — `channel.message_forwarded` shows
-  channel→session input deliveries.
-- Watch the integration call log scroll past in real time.
-- Just observe — opendray's behaviour is highly visible from
-  this page.
+## Page layout
 
-![Activity page](/tutorial/activity-layout.png)
-
-## What you see
-
-Each row is one event:
-
-| Column | Notes |
+| Region | What |
 |---|---|
-| Time | server-side timestamp (UTC) |
-| Topic | dotted-name event id (`session.idle`, `channel.message_sent`, …) |
-| Summary | one-line synthesised from the payload |
-| Expand | click row to see the full JSON payload |
+| Top filters | Integration / Direction / Status / Time range / Topic pattern |
+| Stream | rolling list, newest top |
+| Click row | expand to see full payload |
+| Right pane | event detail viewer |
 
-The newest event is at the top; auto-scroll to follow can be
-toggled (default on). Pause auto-scroll when you want to read a
-specific row without it sliding away.
+## Top filters
 
-## Filters
-
-The filter bar is client-side — events keep streaming over the
-WebSocket regardless. Filtering is by topic prefix:
-
-- `session.` — only session lifecycle events
-- `channel.` — channel inbound, outbound, command, forward
-- `integration.` — call log + auth attempts
-- Any custom prefix you've added via plugins
-
-The filter is sticky per-user; reload the page and your last
-filter persists.
-
-## Live count
-
-The bottom bar shows events/second (smoothed over 5s). Useful
-to gauge whether anything is happening — silence means the bus
-is genuinely quiet, not that the page is broken.
-
-## Read on
-
-| Topic | Section |
+| Filter | Source |
 |---|---|
-| Every event topic + payload shape | Topics catalogue |
+| Integration | dropdown of registered + `admin` |
+| Direction | inbound / outbound / proxied / event |
+| Status | 2xx / 3xx / 4xx / 5xx (for API calls) / event-type (for bus events) |
+| Time range | 5m / 1h / 24h / 7d / custom |
+| Topic pattern | `session.*` / `channel.*.delivery` / `memory.*` etc. |
+
+![Activity layout](/tutorial/activity-layout.png)
+
+## When to use it
+
+| Goal | How |
+|---|---|
+| Debug "why didn't my integration get the event?" | filter by integration + topic pattern |
+| Compliance audit | filter by time range + integration → export CSV |
+| Detect anomalous integration calls | filter by status 5xx |
+| Trace request through the system | search by `request_id` |

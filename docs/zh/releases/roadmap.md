@@ -1,4 +1,17 @@
+---
+kind: concept
+title: 路线图
+tldr: 即将到来工作的高层 "why"。Now / Soon / Later 列。GitHub project board 是粒度追踪。
+status: stable
+since: v0.1.0
+topic: releases
+related: [releases/changelog, releases/showcase]
+x-implementation: [github.com/orgs/opendray/projects]
+---
+
 # 路线图
+
+> **tldr:** 即将到来工作的高层 "why"。Now / Soon / Later 列。[GitHub project board](https://github.com/orgs/opendray/projects) 是粒度追踪。
 
 opendray 接下来几个季度的方向。这是个活的文档 —— 优先级变了,卡片
 就在列之间移动。

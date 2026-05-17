@@ -1,0 +1,87 @@
+{
+  "$schema": "https://docs.opendray.dev/capabilities/_meta.schema.json",
+  "subsystem": "providers",
+  "version": "1.0.0",
+  "stability": "stable",
+  "description": "CLI provider manifests. opendray wraps any local CLI as a PTY-backed session.",
+  "since": "v0.1.0",
+  "implementation": "internal/catalog/",
+  "bundled": [
+    {
+      "id": "claude",
+      "label": "Claude Code",
+      "vendor": "Anthropic",
+      "command": "claude",
+      "auth": "anthropic-api-key | claude-account-token",
+      "session_resume": true,
+      "stream": true,
+      "tool_use": true,
+      "mcp_supported": true,
+      "default_args": [],
+      "runtime_options": {
+        "bypass_permissions": { "type": "boolean", "default": false, "description": "Pass --bypass-permissions" },
+        "max_turns": { "type": "integer", "default": 0, "description": "0 = unlimited" },
+        "skills": { "type": "boolean", "default": true, "description": "Enable opendray skill auto-injection" }
+      },
+      "implementation": "internal/catalog/builtins/claude.json"
+    },
+    {
+      "id": "codex",
+      "label": "Codex CLI",
+      "vendor": "OpenAI",
+      "command": "codex",
+      "auth": "openai-api-key",
+      "session_resume": false,
+      "stream": true,
+      "tool_use": true,
+      "mcp_supported": false,
+      "default_args": [],
+      "implementation": "internal/catalog/builtins/codex.json"
+    },
+    {
+      "id": "gemini",
+      "label": "Gemini CLI",
+      "vendor": "Google",
+      "command": "gemini",
+      "auth": "google-api-key",
+      "session_resume": false,
+      "stream": true,
+      "tool_use": true,
+      "mcp_supported": false,
+      "default_args": [],
+      "implementation": "internal/catalog/builtins/gemini.json"
+    },
+    {
+      "id": "shell",
+      "label": "Shell",
+      "vendor": "system",
+      "command": "$SHELL",
+      "auth": "none",
+      "session_resume": true,
+      "stream": true,
+      "tool_use": false,
+      "mcp_supported": false,
+      "default_args": ["-l"],
+      "description": "Plain interactive shell — useful for ad-hoc remote sessions, deploys, debugging.",
+      "implementation": "internal/catalog/builtins/shell.json"
+    }
+  ],
+  "custom_provider_manifest": {
+    "schema": "/capabilities/providers.schema.json",
+    "location": "config.toml [[providers]] table OR /providers admin → New provider",
+    "fields": {
+      "id": { "type": "string", "required": true, "regex": "^[a-z][a-z0-9_-]*$" },
+      "label": { "type": "string", "required": true },
+      "command": { "type": "string", "required": true },
+      "args": { "type": "string[]", "required": false, "default": [] },
+      "env": { "type": "map<string, string>", "required": false },
+      "cwd_required": { "type": "boolean", "required": false, "default": true },
+      "auth_hint": { "type": "string", "required": false, "description": "human-readable auth steps" }
+    }
+  },
+  "shared": {
+    "pty_ring_buffer_bytes": 1048576,
+    "max_concurrent_sessions": 32,
+    "child_sessions_supported": true
+  }
+}

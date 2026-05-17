@@ -1,34 +1,51 @@
+---
+kind: concept
+title: Plugins — overview
+tldr: Tool extensions auto-injected into every spawned session. 3 kinds — Skills (markdown), MCP servers (stdio/http), Git host adapters (GitHub/Gitea/GitLab).
+status: stable
+since: v0.1.0
+topic: plugins
+related: [plugins/skills, plugins/mcp, plugins/git-hosts]
+references:
+  capabilities: [providers]
+x-implementation: [internal/plugins/]
+---
+
 # Plugins — overview
 
-The Plugins page registers tool extensions that opendray injects
-into compatible CLI sessions on spawn. Three plugin types live
-here:
+> **tldr:** Tool extensions auto-injected into every spawned session. 3 kinds — Skills (markdown), MCP servers (stdio/http), Git host adapters (GitHub/Gitea/GitLab).
 
-| Plugin type | What it does |
+## Three plugin kinds
+
+| Kind | What | Injected as |
+|---|---|---|
+| [Skills](./skills) | reusable markdown procedures Claude can invoke | system-prompt prefix |
+| [MCP servers](./mcp) | external tools speaking Model Context Protocol | MCP server entries in session's `mcp.json` |
+| [Git host adapters](./git-hosts) | GitHub / Gitea / GitLab API wrappers | Git tab in Inspector + Sessions Git workflow |
+
+## Where to register
+
+| Kind | UI |
 |---|---|
-| **Skills** | Reusable prompts / patterns (markdown files) Claude can invoke as slash commands |
-| **MCP servers** | Model Context Protocol servers exposing tool catalogues to compatible CLIs |
-| **Git hosts** | Credentials for remote git pushes (vault sync, codebase clones) — used by the Notes vault and the integrations side |
+| Skills | `/plugins` → Skills tab → builtins + vault-based |
+| MCP servers | `/plugins` → MCP tab → stdio command or HTTP URL |
+| Git hosts | `/settings/git-hosts` → PAT / OAuth per host |
+
+## Auto-injection
+
+| Kind | When | Where |
+|---|---|---|
+| Skills | session spawn | system-prompt prefix |
+| MCP servers | session spawn | `mcp.json` rendered to ephemeral session dir |
+| Git host | when Git tab opens | reads from settings store |
+
+## Per-provider scope
+
+| Provider | Skills | MCP | Git tab |
+|---|---|---|---|
+| `claude` | ✓ (via system prompt) | ✓ | ✓ |
+| `codex` | ✓ | ✓ if `supportsMcp` | ✓ |
+| `gemini` | ✓ | ✗ | ✓ |
+| `shell` | ✗ | ✗ | ✓ |
 
 ![Plugins page](/tutorial/plugins-layout.png)
-
-## Read on
-
-| Topic | Section |
-|---|---|
-| Skills directory + slash command registration | Skills |
-| MCP server catalogue + secrets vault | MCP |
-| SSH keys / HTTPS PATs for git remotes | Git hosts |
-
-## Where plugin state lives
-
-| Plugin | Storage |
-|---|---|
-| Skills | Markdown files under `~/.opendray/vault/skills/` (vault-managed, syncs via git) |
-| MCP servers | JSON config in `~/.opendray/mcp/servers.json` |
-| MCP secrets | Encrypted file `~/.opendray/secrets.env` (key in OS keychain) |
-| Git hosts | Postgres `git_hosts` table; HTTPS tokens in the same secrets vault |
-
-The split is intentional: skill content lives in the vault (so
-multi-host sync just works), but secret material stays per-host
-in the OS-keychain-protected vault.

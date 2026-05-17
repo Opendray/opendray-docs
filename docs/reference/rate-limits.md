@@ -1,4 +1,26 @@
+---
+kind: capability
+title: Rate limits
+tldr: Token bucket per integration key. Default 10 req/s sustained, 30 burst. Override per tier (service 100/300). Per-endpoint stricter caps. X-RateLimit-* headers + Retry-After on 429.
+status: stable
+since: v0.1.0
+topic: reference
+related:
+  - reference/overview
+  - reference/errors
+  - consuming/error-handling
+capability:
+  - per-key-bucket
+  - per-tier-overrides
+  - per-endpoint-overrides
+  - retry-after-header
+x-implementation:
+  - internal/gateway/ratelimit.go
+---
+
 # Rate limits
+
+> **tldr:** Token bucket per integration key. Default 10 req/s sustained, 30 burst. Override per tier (service 100/300). Per-endpoint stricter caps. `X-RateLimit-*` headers + `Retry-After` on 429.
 
 Default thresholds per integration key. Limits are bucket-based
 (token bucket, 1-second refill) and apply *per key*, not per IP.

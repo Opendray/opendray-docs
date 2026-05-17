@@ -1,29 +1,61 @@
-# 欢迎使用 OpenDray
+---
+kind: concept
+title: 欢迎使用 opendray
+tldr: AI 编程 CLI(Claude Code / Codex / Gemini / shell)的自托管控制网关。Web 后台 + 移动 + REST/WS API + 8 messenger + 记忆 + 集成。单 Go 二进制跑你自己硬件。
+status: stable
+since: v0.1.0
+topic: getting-started
+related: [sessions/overview, channels/overview, providers/overview, memory/overview, integrations/overview, consuming/overview, for-ai]
+references:
+  capabilities: [sessions, channels, providers, memory, integrations]
+x-implementation: [cmd/opendray/, internal/]
+---
 
-OpenDray 是一个自托管的 AI 编程 CLI(Claude Code、Codex、Gemini CLI 等)控制平面。它让你在服务器上启动长时间运行的 CLI 会话,从任何设备驱动它们,并桥接到 Telegram、Discord 等消息平台 — 当一个空闲会话需要关注时,它可以主动 ping 你。
+# 欢迎使用 opendray
 
-## 这个管理后台能做什么
+> **tldr:** AI 编程 CLI(Claude Code / Codex / Gemini / shell)的自托管控制网关。Web 后台 + 移动 + REST/WS API + 8 messenger + 记忆 + 集成。单 Go 二进制跑你自己硬件。
 
-| 页面 | 用途 |
-| --- | --- |
-| **Sessions** | 在多标签终端里启动 / 接入 / 驱动 CLI 会话。日常工作台。 |
-| **Channels** | 接入 Telegram / Slack / Discord / 飞书 / DingTalk(钉钉)/ WeCom(企业微信),会话变空闲时通知你,从手机回复。 |
-| **Providers** | 配置 CLI 供应商(Claude、Codex 等) — 路径、环境变量、默认参数。 |
-| **Integrations** | 把 opendray 本身作为 HTTP 网关暴露给第三方工具(托管反向代理、签名集成 token)。 |
-| **Activity** | 事件总线上每个事件的实时跟踪 — 用于调试通知流、频道入站等。 |
-| **Notes** | 兼容 Obsidian 的 markdown 笔记库,带 wiki-link 反向链接。 |
-| **Plugins** | Skill 和 MCP 服务器注册表 — 会话可调用的工具目录。 |
-| **Settings** | 鉴权、主题、键盘快捷键。 |
+## 它给你什么
 
-![Sidebar overview](/tutorial/sidebar-overview.png)
+| 能力 | 页 | Capability JSON |
+|---|---|---|
+| Spawn / 观察 / 驱动 CLI 会话 | [Sessions](../sessions/overview) | [/capabilities/sessions.json](/capabilities/sessions.json) |
+| 通过 Telegram / Slack 等收通知 + 回复 | [Channels](../channels/overview) | [/capabilities/channels.json](/capabilities/channels.json) |
+| 包任意 CLI(Claude / Codex / Gemini / 你自己的) | [Providers](../providers/overview) | [/capabilities/providers.json](/capabilities/providers.json) |
+| 跨 CLI 记忆 + 自动 capture | [Memory](../memory/overview) | [/capabilities/memory.json](/capabilities/memory.json) |
+| 把 opendray 挂作其他 app 的 AI 后端 | [Integrations](../integrations/overview) | [/capabilities/integrations.json](/capabilities/integrations.json) |
 
-## 首次运行清单
+## 首次运行 checklist
 
-如果你刚装好 opendray,按顺序做这几件事:
+| # | 动作 | 在哪 |
+|---|---|---|
+| 1 | 用 admin 密码登录 | 右上 |
+| 2 | 配 Provider(最常见是 `claude`) | Providers |
+| 3 | spawn 你的第一个会话 | Sessions → + New |
+| 4 | 接一个 channel(Telegram = 最快) | Channels → + New |
+| 5 | 看 session.idle 推送来 | 看你的聊天 |
 
-1. **登录** — 管理员凭证写在 `config.toml` 或环境变量里。
-2. **配置 Provider** — 至少把 `claude` 指向二进制路径。否则 spawn 对话框没东西可启动。
-3. **启动第一个会话** — 打开 Sessions → **New session** → 选择一个供应商和工作目录。
-4. **接入一个频道**(可选) — 大部分用户先注册一个 Telegram bot,因为它不需要公网 URL。
+## 何时读什么
 
-接下来的指南会逐页详细讲解。你可以线性阅读,也可以从左侧目录跳转。
+| 目标 | 读 |
+|---|---|
+| 日常工作台布局 | [Sessions](../sessions/overview) |
+| Spawn 对话框参考 | [Spawning](../sessions/spawning) |
+| 接第一个 messenger | [Channels](../channels/overview) → [Telegram](../channels/telegram) |
+| 多账号 Claude | [Claude accounts](../providers/claude-accounts) |
+| 在 opendray 上写 app | [Consuming](../consuming/overview) |
+| 让 AI agents 消费这些文档 | [For AI agents](../for-ai) |
+
+## 这后台不做什么
+
+| ✗ 范围外 |
+|---|
+| 直接 LLM API 调用(CLI 做) |
+| 通用 agent 框架(CLI = agent) |
+| 插件 marketplace / 签名基础设施 |
+| 多租户 SaaS、计费、支付 |
+| 超出 admin / 集成 scope 的 per-user 权限 |
+
+权威 non-goals 见 [manifest.json](/manifest.json)。
+
+![侧栏概览](/tutorial/sidebar-overview.png)

@@ -1,58 +1,84 @@
+---
+kind: capability
+title: Bridge — custom platforms via WebSocket
+tldr: Channels → New → kind=bridge → save the WS URL + token → run an adapter in any language. The adapter speaks opendray's WS protocol; opendray treats it as a normal channel.
+status: stable
+since: v0.1.0
+topic: channels
+related:
+  - channels/overview
+  - channels/routing
+capability:
+  - text
+  - card
+  - buttons
+  - image
+  - file
+  - typing
+  - update-message
+  - reply-routing
+  - adapter-defined
+inbound: websocket
+outbound: websocket
+public-url-required: false
+setup-time-minutes: 30
+x-implementation:
+  - internal/channel/bridge/
+x-protocol-spec: docs/bridge-protocol.md
+---
+
 # Bridge — custom platforms via WebSocket
 
-When you need a platform opendray doesn't bundle (LINE, KakaoTalk,
-your company's internal chat, …), the **bridge** kind exposes a
-WebSocket protocol an external adapter can speak. Run the adapter
-in any language — Python, Node, Rust — and it appears as a regular
-Channel inside opendray.
+> **tldr:** **Channels → New → kind=bridge** → save the WS URL + token → run an adapter in any language. The adapter speaks opendray's WS protocol; opendray treats it as a regular channel.
 
-**Setup time:** depends on how complex the target platform is. The
-opendray side is 30 seconds (a token). The adapter side is whatever
-the platform demands.
+## When to use
 
-## When to reach for bridge
-
-- The target platform isn't in the bundled list
-- You need custom routing logic between users + sessions
-- You want to integrate a webhook source other than messaging
-  (cron triggers, build status, etc.)
-
-## 1. Create a bridge channel slot in opendray
-
-Channels → **New channel** → kind **bridge**.
-
-| Field | Value |
+| You need | Use |
 |---|---|
-| **Bridge name** | human label, e.g. `wechat`, `discord-custom`, `whatsapp` |
-| **Adapter token** | auto-generated 24-byte random hex; click ↻ to regenerate or 📋 to copy |
-| **Accept capabilities** | optional whitelist — when empty, the bridge accepts whatever the adapter declares; when non-empty, only the selected capabilities are honoured |
+| Platform not in bundled list (LINE, KakaoTalk, internal IM, ...) | bridge ✓ |
+| Custom user ↔ session routing logic | bridge ✓ |
+| Non-IM trigger source (cron, build status, webhooks) | bridge ✓ |
+| Bidirectional support for DingTalk / WeCom (currently outbound only) | bridge + App Platform adapter |
 
-Save with **Enabled = on**.
+## Setup
 
-![Bridge channel form](/tutorial/bridge-create-form.png)
+| # | Action | Where |
+|---|---|---|
+| 1 | opendray **Channels → New → kind=bridge** → name it (`wechat-custom`) → auto-generate adapter token (24-byte hex) | opendray admin |
+| 2 | Optionally set **Accept capabilities** to a whitelist (otherwise accepts whatever the adapter declares) | opendray admin |
+| 3 | Save → **Setup** dialog opens with WS URL + ready-to-paste Python/Node/wscat snippets | opendray admin |
+| 4 | Run the adapter against the upstream platform | external process |
 
-After saving, the **Adapter setup** dialog opens automatically with
-the WebSocket URL + ready-to-paste Python / Node / wscat starter
-snippets.
+## Config schema
 
-![Bridge adapter setup with code snippets](/tutorial/bridge-adapter-setup.png)
+```yaml
+kind: bridge                                # literal, required
+name: string                                # human label, e.g. "wechat-custom"
+adapter_token: hex                          # secret, auto-generated 24-byte; rotate via ↻
+accept_capabilities:                        # optional whitelist
+  - text
+  - card
+  - buttons
+  - image
+notify:
+  started:          false
+  idle:             true
+  ended:            true
+  permission_ask:   true
+repeat_policy: once-per-session
+enabled: true
+```
 
-You can re-open this dialog any time via the **Setup** button on
-the channel card.
-
-## 2. Run the adapter
-
-Connect to the WebSocket URL. Auth is the bridge token via:
+## Adapter authentication
 
 | Method | Example |
 |---|---|
-| Header | `X-Bridge-Token: <token>` |
-| Header | `Authorization: Bearer <token>` |
-| Query | `?token=<token>` |
-| First WS frame | `{"type":"register", "token":"…", …}` |
+| HTTP header | `X-Bridge-Token: <token>` |
+| HTTP header | `Authorization: Bearer <token>` |
+| Query param | `?token=<token>` |
+| First WS frame | `{"type":"register", "token":"...", ...}` |
 
-The first frame **must** be a `register` declaring the adapter's
-identity and capabilities:
+The first frame **must** be a `register`:
 
 ```json
 {
@@ -63,15 +89,13 @@ identity and capabilities:
 }
 ```
 
-opendray replies with `{"type":"register_ack","ok":true}` (or
+opendray replies `{"type":"register_ack","ok":true}` (or
 `ok:false` with an `error` field).
 
-## 3. Inbound: adapter → opendray
-
-When a user sends a message in the upstream platform, the adapter
-translates it into:
+## Inbound: adapter → opendray
 
 ```json
+// user message
 {
   "type": "message",
   "session_key": "wechat-custom:gid42:user123",
@@ -81,15 +105,8 @@ translates it into:
   "text": "Hello opendray",
   "reply_ctx": "<adapter-opaque-handle>"
 }
-```
 
-`reply_ctx` is whatever the adapter needs to send a reply back
-later — opendray echoes it on every outbound frame. Often it's
-the platform's message id, but the adapter chooses the format.
-
-For button clicks (when the adapter supports cards):
-
-```json
+// button click
 {
   "type": "card_action",
   "session_key": "...",
@@ -99,14 +116,13 @@ For button clicks (when the adapter supports cards):
 }
 ```
 
+`reply_ctx` is opaque to opendray — echoed back on every outbound
+frame so the adapter can correlate.
+
 opendray's Hub recognises `cmd:/...` actions and dispatches them
 through the slash-command registry.
 
-## 4. Outbound: opendray → adapter
-
-When a session goes idle (or any other event the channel notifies
-on), opendray sends frames the adapter must render in the upstream
-platform:
+## Outbound: opendray → adapter
 
 ```json
 { "type": "send", "session_key": "...", "reply_ctx": "...", "text": "Acknowledged." }
@@ -119,47 +135,80 @@ platform:
       { "Content": "Session abc went idle." },
       { "Buttons": [[
         { "text": "Resume", "value": "cmd:/resume abc", "style": "primary" },
-        { "text": "End", "value": "cmd:/cancel abc", "style": "danger" }
+        { "text": "End",    "value": "cmd:/cancel abc", "style": "danger" }
       ]]}
     ]
-  } }
+  }
+}
 
 { "type": "send_buttons", "session_key": "...", "text": "...", "buttons": [...] }
 { "type": "update_message", "session_key": "...", "preview_handle": "<id>", "text": "..." }
-{ "type": "send_image", "session_key": "...", "image": { "path": "...", "url": "..." } }
-{ "type": "send_file", "session_key": "...", "file": { "path": "...", "filename": "..." } }
+{ "type": "send_image",  "session_key": "...", "image": { "path": "...", "url": "..." } }
+{ "type": "send_file",   "session_key": "...", "file": { "path": "...", "filename": "..." } }
 { "type": "start_typing", "session_key": "..." }
-{ "type": "stop_typing", "session_key": "..." }
+{ "type": "stop_typing",  "session_key": "..." }
 { "type": "pong" }
 ```
 
 The adapter only receives frame types corresponding to capabilities
-it claimed on register — opendray gates by the
-`accept_capabilities` whitelist + the adapter's declared list.
+it claimed on register, gated by `accept_capabilities`.
 
-## 5. Heartbeat
+## Heartbeat + reconnect
 
-opendray sends WebSocket-level Ping frames every ~54s. Most WS
-libraries auto-reply Pong. The adapter can also send
-application-level `{"type":"ping"}` and opendray replies with
-`{"type":"pong"}`.
+| concern | behaviour |
+|---|---|
+| keepalive | opendray sends WS-level Ping every ~54s; most libs auto-Pong |
+| app-level ping | adapter may send `{"type":"ping"}` → opendray replies `{"type":"pong"}` |
+| reconnect | adapter reconnects any time with same token; fresh `register` replaces prior connection |
+| disconnect behaviour | opendray returns `ErrNotSupported` for outbound → Hub falls back to text |
 
-## 6. Reconnection
+## Capabilities
+
+| feature | supported | implementation note |
+|---|---|---|
+| inbound message | ✓ | `type: message` frame |
+| inbound card action | ✓ | `type: card_action` with `cmd:/...` value |
+| outbound text | ✓ | `type: send` |
+| outbound card | ✓ | `type: send_card` |
+| outbound update | ✓ | `type: update_message` with `preview_handle` |
+| typing indicator | ✓ | `start_typing` / `stop_typing` |
+| image / file | ✓ | adapter-defined transport |
+| capability gating | ✓ | only declared + whitelisted frames flow |
+
+## Errors
+
+| code | cause | fix |
+|---|---|---|
+| `bridge_auth_failed` | bad token | re-copy or rotate token in opendray |
+| `bridge_register_required` | first frame wasn't `register` | send register before any other frame |
+| `bridge_capability_not_declared` | adapter sent frame outside its declared capabilities | add to `capabilities` on register or stop sending |
+| `bridge_session_unknown` | `session_key` doesn't map to a known session | check Hub routing rules |
+
+## Limitations
+
+| limit | value | note |
+|---|---|---|
+| reply_ctx size | up to 1 KB | opaque to opendray |
+| frame size | up to 256 KB | WS message limit |
+| concurrent adapters per bridge | 1 | new register replaces old connection |
+
+<details>
+<summary>📖 Narrative explanation</summary>
 
 The bridge's broker registration in opendray persists across WS
 disconnects — the adapter can reconnect at any time with the same
 token. A fresh `register` frame replaces any prior connection.
-While disconnected, opendray returns `ErrNotSupported` for
-outbound calls (which the Hub treats as "fall back to text").
+While disconnected, opendray returns `ErrNotSupported` for outbound
+calls (which the Hub treats as "fall back to text").
 
-## Reference: minimal Python adapter
+A minimal Python adapter starter is auto-rendered in the **Adapter
+setup** dialog of every bridge channel, with your specific URL +
+token + name + capability list substituted, so you can paste-and-
+run.
 
-Already available in the **Adapter setup** dialog of every bridge
-channel. The dialog substitutes your specific URL + token + name
-+ capability list, so you can paste-and-run.
+The full protocol spec — every frame type, every edge case, every
+error envelope — lives at
+[`docs/bridge-protocol.md`](https://github.com/Opendray/opendray_v2/blob/main/docs/bridge-protocol.md)
+in the v2 repository.
 
-## Full protocol spec
-
-`docs/bridge-protocol.md` in the repository has the complete frame
-catalogue + edge cases. The adapter setup dialog is for getting
-started; the spec is for production-quality adapters.
+</details>
